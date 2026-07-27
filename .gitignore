@@ -25,10 +25,7 @@ go.work
 go.work.sum
 
 # env file
-DATABASE_URL=postgres://postgres:1224@localhost:5432/postgres
-JWT_SECRET=818f2e4c00867ed63200357ba57671271e2d9efe8f2d3a36bef86a71ea959a22
-ALLOWED_ORIGIN=http://localhost:5173
-PORT=8080
+.env
 
 # Editor/IDE
 # .idea/
