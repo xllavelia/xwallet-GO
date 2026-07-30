@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -80,6 +81,11 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		user, err := users_sql.GetUserByIdentifier(r.Context(), pool, req.PlayerID)
 		if err != nil {
 			http.Error(w, "user was created but could not be loaded", http.StatusInternalServerError)
+			return
+		}
+
+		if err := wallet_sql.InsertWallet(r.Context(), pool, user.ID); err != nil {
+			http.Error(w, "could not create wallet", http.StatusInternalServerError)
 			return
 		}
 

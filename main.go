@@ -17,6 +17,7 @@ import (
 	"xwallet-server/transfer_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/voucher_sql"
+	"xwallet-server/wallet_http"
 	"xwallet-server/wallet_sql"
 )
 
@@ -98,6 +99,7 @@ func main() {
 	http.HandleFunc("/auth/login", auth_http.WithCORS(auth_http.LoginHandler(pool)))
 	http.HandleFunc("/auth/generate-id", auth_http.WithCORS(auth_http.GenerateIDHandler(pool)))
 	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler)))
+	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
