@@ -10,6 +10,7 @@ import (
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/db_connection"
+	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
@@ -99,6 +100,9 @@ func main() {
 	http.HandleFunc("/auth/login", auth_http.WithCORS(auth_http.LoginHandler(pool)))
 	http.HandleFunc("/auth/generate-id", auth_http.WithCORS(auth_http.GenerateIDHandler(pool)))
 	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler)))
+	http.HandleFunc("/positions/open", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenPositionHandler(pool))))
+	http.HandleFunc("/positions/close", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ClosePositionHandler(pool))))
+	http.HandleFunc("/positions/open-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListOpenPositionsHandler(pool))))
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -108,7 +112,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
+	positions_http.StartLiquidationWorker(pool)
 	log.Println("Auth server running on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
