@@ -15,6 +15,7 @@ import (
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_sql"
+	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/voucher_sql"
@@ -103,6 +104,8 @@ func main() {
 	http.HandleFunc("/positions/open", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenPositionHandler(pool))))
 	http.HandleFunc("/positions/close", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ClosePositionHandler(pool))))
 	http.HandleFunc("/positions/open-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListOpenPositionsHandler(pool))))
+	http.HandleFunc("/positions/closed-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListClosedPositionsHandler(pool))))
+	http.HandleFunc("/transfers/list", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.ListTransfersHandler(pool))))
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
