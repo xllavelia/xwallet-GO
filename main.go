@@ -56,6 +56,12 @@ func main() {
 	if err := referral_sql.CreateReferralLinksTable(ctx, pool); err != nil {
 		log.Fatal("referral_links table: ", err)
 	}
+	if err := contacts_sql.EnableTrgmExtension(ctx, pool); err != nil {
+		log.Fatal("pg_trgm extension: ", err)
+	}
+	if err := contacts_sql.AddSearchIndexes(ctx, pool); err != nil {
+		log.Fatal("search indexes: ", err)
+	}
 	if err := referral_sql.CreateCommissionRatesTable(ctx, pool); err != nil {
 		log.Fatal("referral_commission_rates table: ", err)
 	}
