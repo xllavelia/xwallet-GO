@@ -9,6 +9,8 @@ import (
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_sql"
+	"xwallet-server/contacts_http"
+	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
@@ -82,6 +84,13 @@ func main() {
 		log.Fatal("seeding promo codes: ", err)
 	}
 
+	if err := contacts_sql.CreateContactsTable(ctx, pool); err != nil {
+		log.Fatal("contacts table: ", err)
+	}
+	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
+		log.Fatal("transfers reference_code migration: ", err)
+	}
+
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -106,6 +115,11 @@ func main() {
 	http.HandleFunc("/positions/open-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListOpenPositionsHandler(pool))))
 	http.HandleFunc("/positions/closed-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListClosedPositionsHandler(pool))))
 	http.HandleFunc("/transfers/list", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.ListTransfersHandler(pool))))
+	http.HandleFunc("/users/search", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.SearchUsersHandler(pool))))
+	http.HandleFunc("/contacts/add", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.AddContactHandler(pool))))
+	http.HandleFunc("/contacts/list", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.ListContactsHandler(pool))))
+	http.HandleFunc("/transfers/send", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.SendTransferHandler(pool))))
+	http.HandleFunc("/transfers/detail", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.GetTransferDetailHandler(pool))))
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
