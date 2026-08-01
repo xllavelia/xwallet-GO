@@ -129,6 +129,7 @@ func main() {
 	http.HandleFunc("/contacts/list", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.ListContactsHandler(pool))))
 	http.HandleFunc("/transfers/send", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.SendTransferHandler(pool))))
 	http.HandleFunc("/transfers/detail", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.GetTransferDetailHandler(pool))))
+	http.HandleFunc("/contacts/remove", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.RemoveContactHandler(pool))))
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))

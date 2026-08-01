@@ -1,12 +1,12 @@
 package contacts_sql
 
 type ContactItem struct {
-	PlayerID string
-	Username string
+	PlayerID string `json:"playerId"`
+	Username string `json:"username"`
 }
 
 type UserSearchResult struct {
-	PlayerID  string
-	Username  string
-	IsContact bool
+	PlayerID  string `json:"playerId"`
+	Username  string `json:"username"`
+	IsContact bool   `json:"isContact"`
 }
