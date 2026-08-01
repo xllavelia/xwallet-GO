@@ -44,6 +44,9 @@ func main() {
 	if err := users_sql.CreateUsersTable(ctx, pool); err != nil {
 		log.Fatal("users table: ", err)
 	}
+	if err := users_sql.MigratePlayerIDToVarchar(ctx, pool); err != nil {
+		log.Fatal("player_id migration: ", err)
+	}
 	if err := wallet_sql.CreateWalletsTable(ctx, pool); err != nil {
 		log.Fatal("wallets table: ", err)
 	}
