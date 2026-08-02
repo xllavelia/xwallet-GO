@@ -8,6 +8,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
+	"xwallet-server/card_http"
 	"xwallet-server/card_sql"
 	"xwallet-server/contacts_http"
 	"xwallet-server/contacts_sql"
@@ -119,6 +120,7 @@ func main() {
 	http.HandleFunc("/auth/login", auth_http.WithCORS(auth_http.LoginHandler(pool)))
 	http.HandleFunc("/auth/generate-id", auth_http.WithCORS(auth_http.GenerateIDHandler(pool)))
 	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler)))
+	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/positions/open", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenPositionHandler(pool))))
 	http.HandleFunc("/positions/close", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ClosePositionHandler(pool))))
 	http.HandleFunc("/positions/open-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListOpenPositionsHandler(pool))))
@@ -130,7 +132,9 @@ func main() {
 	http.HandleFunc("/transfers/send", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.SendTransferHandler(pool))))
 	http.HandleFunc("/transfers/detail", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.GetTransferDetailHandler(pool))))
 	http.HandleFunc("/contacts/remove", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.RemoveContactHandler(pool))))
-	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
+	http.HandleFunc("/card", auth_http.WithCORS(auth_http.RequireAuth(card_http.GetCardHandler(pool))))
+	http.HandleFunc("/tradecoin", auth_http.WithCORS(auth_http.RequireAuth(card_http.TradeHandler(pool))))
+	http.HandleFunc("/swap", auth_http.WithCORS(auth_http.RequireAuth(card_http.SwapHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
