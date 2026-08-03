@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/wallet_sql"
 
@@ -88,7 +89,10 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not create wallet", http.StatusInternalServerError)
 			return
 		}
-
+		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome"); err != nil {
+			http.Error(w, "could not create welcome voucher", http.StatusInternalServerError)
+			return
+		}
 		token, err := generateToken(user)
 		if err != nil {
 			http.Error(w, "could not create session", http.StatusInternalServerError)

@@ -21,6 +21,8 @@ import (
 	"xwallet-server/referral_sql"
 	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
+	"xwallet-server/user_vouchers_http"
+	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/voucher_sql"
 	"xwallet-server/wallet_http"
@@ -97,7 +99,12 @@ func main() {
 	if err := promo_sql.SeedPromoCodes(ctx, pool); err != nil {
 		log.Fatal("seeding promo codes: ", err)
 	}
-
+	if err := user_vouchers_sql.CreateUserVouchersTable(ctx, pool); err != nil {
+		log.Fatal("user_vouchers table: ", err)
+	}
+	if err := wallet_sql.AddLavxBalanceColumn(ctx, pool); err != nil {
+		log.Fatal("lavx_balance migration: ", err)
+	}
 	if err := contacts_sql.CreateContactsTable(ctx, pool); err != nil {
 		log.Fatal("contacts table: ", err)
 	}
@@ -140,6 +147,11 @@ func main() {
 	http.HandleFunc("/tradecoin", auth_http.WithCORS(auth_http.RequireAuth(card_http.TradeHandler(pool))))
 	http.HandleFunc("/swap", auth_http.WithCORS(auth_http.RequireAuth(card_http.SwapHandler(pool))))
 	http.HandleFunc("/card/history", auth_http.WithCORS(auth_http.RequireAuth(card_http.ListCardHistoryHandler(pool))))
+	http.HandleFunc("/vouchers/list", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.ListVouchersHandler(pool))))
+	http.HandleFunc("/vouchers/activate", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.ActivateVoucherHandler(pool))))
+	http.HandleFunc("/vouchers/delete", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DeleteVoucherHandler(pool))))
+	http.HandleFunc("/vouchers/dev-grant", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DevGrantHandler(pool))))
+	http.HandleFunc("/vouchers/dev-reset", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DevResetHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
