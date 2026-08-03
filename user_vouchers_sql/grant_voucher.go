@@ -35,7 +35,7 @@ func GrantFeeDiscountVoucher(ctx context.Context, pool *pgxpool.Pool, userID int
 }
 
 func GrantCreditVoucher(ctx context.Context, pool *pgxpool.Pool, userID int, voucherType string, creditAmount float64, source string) error {
-	if voucherType != "usdt_credit" && voucherType != "lavx_credit" {
+	if voucherType != "usdt_credit" && voucherType != "lavx_credit" && voucherType != "ref_xp_credit" {
 		return errors.New("invalid credit voucher type")
 	}
 

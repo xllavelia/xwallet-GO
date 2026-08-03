@@ -46,7 +46,7 @@ func DevGrantHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		var grantErr error
 		if req.Type == "fee_discount" {
 			grantErr = user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, userID, req.Amount, 345600, "dev")
-		} else if req.Type == "usdt_credit" || req.Type == "lavx_credit" {
+		} else if req.Type == "usdt_credit" || req.Type == "lavx_credit" || req.Type == "ref_xp_credit" {
 			grantErr = user_vouchers_sql.GrantCreditVoucher(r.Context(), pool, userID, req.Type, req.Amount, "dev")
 		} else {
 			http.Error(w, "invalid voucher type", http.StatusBadRequest)

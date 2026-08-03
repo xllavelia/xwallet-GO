@@ -125,6 +125,11 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		if err := wallet_sql.AdjustBalance(r.Context(), pool, userID, -totalRequired); err != nil {
+			http.Error(w, "position opened but balance update failed", http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(positionResponse{

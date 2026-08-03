@@ -22,7 +22,7 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 
 	err = tx.QueryRow(ctx, `
 		DELETE FROM user_vouchers
-		WHERE id = $1 AND user_id = $2 AND voucher_type IN ('usdt_credit', 'lavx_credit')
+		WHERE id = $1 AND user_id = $2 AND voucher_type IN ('usdt_credit', 'lavx_credit', 'ref_xp_credit')
 		RETURNING voucher_type, credit_amount;
 	`, id, userID).Scan(&voucherType, &amount)
 	if err != nil {
@@ -34,8 +34,10 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 
 	if voucherType == "usdt_credit" {
 		_, err = tx.Exec(ctx, `UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2;`, amount, userID)
-	} else {
+	} else if voucherType == "lavx_credit" {
 		_, err = tx.Exec(ctx, `UPDATE wallets SET lavx_balance = lavx_balance + $1 WHERE user_id = $2;`, amount, userID)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE referrals SET ref_xp = ref_xp + $1 WHERE user_id = $2;`, int(amount), userID)
 	}
 	if err != nil {
 		return "", 0, err

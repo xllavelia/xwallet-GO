@@ -18,6 +18,7 @@ import (
 	"xwallet-server/positions_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
+	"xwallet-server/referral_http"
 	"xwallet-server/referral_sql"
 	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
@@ -62,6 +63,12 @@ func main() {
 	}
 	if err := referral_sql.CreateReferralLinksTable(ctx, pool); err != nil {
 		log.Fatal("referral_links table: ", err)
+	}
+	if err := referral_sql.MigrateReferralsSchema(ctx, pool); err != nil {
+		log.Fatal("referrals migration: ", err)
+	}
+	if err := user_vouchers_sql.MigrateVoucherTypesForRefXP(ctx, pool); err != nil {
+		log.Fatal("voucher ref_xp_credit migration: ", err)
 	}
 	if err := contacts_sql.EnableTrgmExtension(ctx, pool); err != nil {
 		log.Fatal("pg_trgm extension: ", err)
@@ -152,6 +159,8 @@ func main() {
 	http.HandleFunc("/vouchers/delete", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DeleteVoucherHandler(pool))))
 	http.HandleFunc("/vouchers/dev-grant", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DevGrantHandler(pool))))
 	http.HandleFunc("/vouchers/dev-reset", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DevResetHandler(pool))))
+	http.HandleFunc("/referral", auth_http.WithCORS(auth_http.RequireAuth(referral_http.GetReferralHandler(pool))))
+	http.HandleFunc("/referral/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(referral_http.DevAddXPHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
