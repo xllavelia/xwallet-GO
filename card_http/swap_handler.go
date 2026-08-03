@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
 
@@ -113,7 +114,14 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		swapPrice := 0.0
+		if toAmount > 0 {
+			swapPrice = usdValue / req.FromAmount
+		}
+		card_history_sql.InsertEntryPool(r.Context(), pool, userID, "swap", req.FromAsset, req.ToAsset, req.FromAmount, toAmount, swapPrice)
+
 		rate := 0.0
+
 		if req.FromAmount > 0 {
 			rate = toAmount / req.FromAmount
 		}

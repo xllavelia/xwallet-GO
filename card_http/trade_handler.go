@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
 
@@ -84,6 +85,12 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			http.Error(w, "trade failed", http.StatusInternalServerError)
 			return
+		}
+
+		if req.Direction == "buy" {
+			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "buy", "USDT", req.Coin, req.UsdAmount, coinAmount, price)
+		} else {
+			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "sell", req.Coin, "USDT", coinAmount, req.UsdAmount, price)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

@@ -8,6 +8,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
+	"xwallet-server/card_history_sql"
 	"xwallet-server/card_http"
 	"xwallet-server/card_sql"
 	"xwallet-server/contacts_http"
@@ -75,6 +76,9 @@ func main() {
 	if err := voucher_sql.CreateVouchersTable(ctx, pool); err != nil {
 		log.Fatal("vouchers table: ", err)
 	}
+	if err := card_history_sql.CreateCardHistoryTable(ctx, pool); err != nil {
+		log.Fatal("card_history table: ", err)
+	}
 	if err := card_sql.CreateCryptoCardsTable(ctx, pool); err != nil {
 		log.Fatal("crypto_cards table: ", err)
 	}
@@ -135,6 +139,7 @@ func main() {
 	http.HandleFunc("/card", auth_http.WithCORS(auth_http.RequireAuth(card_http.GetCardHandler(pool))))
 	http.HandleFunc("/tradecoin", auth_http.WithCORS(auth_http.RequireAuth(card_http.TradeHandler(pool))))
 	http.HandleFunc("/swap", auth_http.WithCORS(auth_http.RequireAuth(card_http.SwapHandler(pool))))
+	http.HandleFunc("/card/history", auth_http.WithCORS(auth_http.RequireAuth(card_http.ListCardHistoryHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
