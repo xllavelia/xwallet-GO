@@ -17,6 +17,7 @@ import (
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
 	"xwallet-server/prime_sql"
+	"xwallet-server/promo_http"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_http"
 	"xwallet-server/referral_sql"
@@ -115,6 +116,12 @@ func main() {
 	if err := contacts_sql.CreateContactsTable(ctx, pool); err != nil {
 		log.Fatal("contacts table: ", err)
 	}
+	if err := promo_sql.CreateRedemptionsTable(ctx, pool); err != nil {
+		log.Fatal("promo_code_redemptions table: ", err)
+	}
+	if err := promo_sql.RealignSeedRewards(ctx, pool); err != nil {
+		log.Fatal("promo rewards realignment: ", err)
+	}
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
@@ -161,6 +168,7 @@ func main() {
 	http.HandleFunc("/vouchers/dev-reset", auth_http.WithCORS(auth_http.RequireAuth(user_vouchers_http.DevResetHandler(pool))))
 	http.HandleFunc("/referral", auth_http.WithCORS(auth_http.RequireAuth(referral_http.GetReferralHandler(pool))))
 	http.HandleFunc("/referral/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(referral_http.DevAddXPHandler(pool))))
+	http.HandleFunc("/promo/redeem", auth_http.WithCORS(auth_http.RequireAuth(promo_http.RedeemHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
