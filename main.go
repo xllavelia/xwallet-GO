@@ -47,6 +47,9 @@ func main() {
 	}
 	defer pool.Close()
 
+	if err := promo_sql.EmergencyDedupeAndFix(ctx, pool); err != nil {
+		log.Println("WARNING: emergency dedupe failed (non-fatal, continuing): ", err)
+	}
 	if err := users_sql.CreateUsersTable(ctx, pool); err != nil {
 		log.Fatal("users table: ", err)
 	}

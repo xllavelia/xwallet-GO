@@ -8,8 +8,6 @@ import (
 
 func RealignSeedRewards(ctx context.Context, pool *pgxpool.Pool) error {
 	sqlQuery := `
-	UPDATE promo_codes SET code = UPPER(code);
-
 	UPDATE promo_codes SET reward_type = 'usdt', reward_value = 25.00
 		WHERE code = 'X27A1M20SN2';
 	UPDATE promo_codes SET reward_type = 'usdt_voucher', reward_value = 100.00
