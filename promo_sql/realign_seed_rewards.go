@@ -6,8 +6,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Старые тестовые коды были засеяны до того, как появились реальные
-// Voucher/Referral системы. Приводит их к тому, что реально работает сейчас.
 func RealignSeedRewards(ctx context.Context, pool *pgxpool.Pool) error {
 	sqlQuery := `
 	UPDATE promo_codes SET code = UPPER(code);
