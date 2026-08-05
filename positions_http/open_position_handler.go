@@ -2,10 +2,14 @@ package positions_http
 
 import (
 	"encoding/json"
+	"errors"
+	"math/rand"
 	"net/http"
 
 	"xwallet-server/auth_http"
 	"xwallet-server/positions_sql"
+	"xwallet-server/referral_sql"
+	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/wallet_sql"
 
@@ -32,11 +36,22 @@ type positionResponse struct {
 	Amount            float64  `json:"amount"`
 	Margin            float64  `json:"margin"`
 	Fees              float64  `json:"fees"`
+	FeesFromVoucher   float64  `json:"feesFromVoucher"`
+	FeesFromBalance   float64  `json:"feesFromBalance"`
 	FeesPaidByVoucher bool     `json:"feesPaidByVoucher"`
 	LiqPrice          float64  `json:"liqPrice"`
 	AutoClose         bool     `json:"autoClose"`
 	AutoCloseTarget   *float64 `json:"autoCloseTarget"`
 	OpenedAt          string   `json:"openedAt"`
+}
+
+func generateTradeID() string {
+	chars := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	out := make([]byte, 6)
+	for i := range out {
+		out[i] = chars[rand.Intn(len(chars))]
+	}
+	return "TRD-" + string(out)
 }
 
 func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -81,22 +96,35 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		balance, err := wallet_sql.GetBalanceByUserID(r.Context(), pool, userID)
-		if err != nil {
-			http.Error(w, "could not read wallet", http.StatusInternalServerError)
-			return
-		}
-
 		margin := req.Amount / float64(req.Leverage)
-		fees := CalcFees(req.Amount)
-		totalRequired := margin + fees
+		fees := CalcFeesOnMargin(margin)
+		liqPrice := CalcLiquidationPrice(req.EntryPrice, req.Leverage, req.Type)
 
-		if balance < totalRequired {
-			http.Error(w, "insufficient balance", http.StatusPaymentRequired)
+		tx, err := pool.Begin(r.Context())
+		if err != nil {
+			http.Error(w, "could not start transaction", http.StatusInternalServerError)
 			return
 		}
+		defer tx.Rollback(r.Context())
 
-		liqPrice := CalcLiquidationPrice(req.EntryPrice, req.Leverage, req.Type)
+		feesFromVoucher := 0.0
+		voucherID := 0
+		voucher, voucherErr := user_vouchers_sql.FindActiveFeeVoucherForUpdate(r.Context(), tx, userID)
+		if voucherErr == nil {
+			remaining := voucher.LimitAmount - voucher.UsedAmount
+			if remaining > 0 {
+				if fees <= remaining {
+					feesFromVoucher = fees
+				} else {
+					feesFromVoucher = remaining
+				}
+				voucherID = voucher.ID
+			}
+		}
+		feesFromBalance := fees - feesFromVoucher
+		feesPaidByVoucher := feesFromVoucher > 0 && feesFromBalance <= 0
+
+		totalRequired := margin + feesFromBalance
 
 		pos := positions_sql.Position{
 			TradeID:           generateTradeID(),
@@ -108,54 +136,50 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			Amount:            req.Amount,
 			Margin:            margin,
 			Fees:              fees,
-			FeesPaidByVoucher: false,
+			FeesPaidByVoucher: feesPaidByVoucher,
 			LiqPrice:          liqPrice,
 			AutoClose:         req.AutoClose,
 			AutoCloseTarget:   req.AutoCloseTarget,
 		}
 
-		created, err := positions_sql.InsertPosition(r.Context(), pool, pos)
+		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)
 		if err != nil {
 			http.Error(w, "could not open position", http.StatusInternalServerError)
 			return
 		}
 
-		if err := wallet_sql.AdjustBalance(r.Context(), pool, userID, -totalRequired); err != nil {
-			http.Error(w, "position opened but balance update failed", http.StatusInternalServerError)
+		if err := wallet_sql.AdjustBalanceTx(r.Context(), tx, userID, -totalRequired); err != nil {
+			if errors.Is(err, wallet_sql.ErrInsufficientBalanceTx) {
+				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
+				return
+			}
+			http.Error(w, "could not update balance", http.StatusInternalServerError)
 			return
 		}
 
-		if err := wallet_sql.AdjustBalance(r.Context(), pool, userID, -totalRequired); err != nil {
-			http.Error(w, "position opened but balance update failed", http.StatusInternalServerError)
+		if voucherID != 0 && feesFromVoucher > 0 {
+			if err := user_vouchers_sql.ConsumeVoucherAmount(r.Context(), tx, voucherID, feesFromVoucher); err != nil {
+				http.Error(w, "could not apply voucher", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(r.Context()); err != nil {
+			http.Error(w, "could not finalize trade", http.StatusInternalServerError)
 			return
 		}
+
+		referral_sql.CreditReferrerIfAny(r.Context(), pool, userID, feesFromBalance, req.Amount)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(positionResponse{
-			ID:                created.ID,
-			TradeID:           created.TradeID,
-			Coin:              created.Coin,
-			Type:              created.Type,
-			EntryPrice:        created.EntryPrice,
-			Leverage:          created.Leverage,
-			Amount:            created.Amount,
-			Margin:            created.Margin,
-			Fees:              created.Fees,
-			FeesPaidByVoucher: created.FeesPaidByVoucher,
-			LiqPrice:          created.LiqPrice,
-			AutoClose:         created.AutoClose,
-			AutoCloseTarget:   created.AutoCloseTarget,
-			OpenedAt:          created.OpenedAt.Format("2006-01-02T15:04:05Z"),
+			ID: created.ID, TradeID: created.TradeID, Coin: created.Coin, Type: created.Type,
+			EntryPrice: created.EntryPrice, Leverage: created.Leverage, Amount: created.Amount,
+			Margin: created.Margin, Fees: fees, FeesFromVoucher: feesFromVoucher, FeesFromBalance: feesFromBalance,
+			FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: created.LiqPrice,
+			AutoClose: created.AutoClose, AutoCloseTarget: created.AutoCloseTarget,
+			OpenedAt: created.OpenedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
-}
-
-func generateTradeID() string {
-	chars := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	out := make([]byte, 6)
-	for i := range out {
-		out[i] = chars[randIndex(len(chars))]
-	}
-	return "TRD-" + string(out)
 }

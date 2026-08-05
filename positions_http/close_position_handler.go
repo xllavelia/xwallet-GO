@@ -70,13 +70,25 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			result = "loss"
 		}
 
-		if err := positions_sql.ClosePosition(r.Context(), pool, id, req.ClosePrice, pnl, pnlPercent, result); err != nil {
+		tx, err := pool.Begin(r.Context())
+		if err != nil {
+			http.Error(w, "could not start transaction", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(r.Context())
+
+		if err := positions_sql.ClosePositionTx(r.Context(), tx, id, req.ClosePrice, pnl, pnlPercent, result); err != nil {
 			http.Error(w, "could not close position", http.StatusInternalServerError)
 			return
 		}
 
-		if err := wallet_sql.AdjustBalance(r.Context(), pool, userID, pos.Margin+pnl); err != nil {
-			http.Error(w, "position closed but balance update failed", http.StatusInternalServerError)
+		if err := wallet_sql.AdjustBalanceTx(r.Context(), tx, userID, pos.Margin+pnl); err != nil {
+			http.Error(w, "could not update balance", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(r.Context()); err != nil {
+			http.Error(w, "could not finalize close", http.StatusInternalServerError)
 			return
 		}
 
