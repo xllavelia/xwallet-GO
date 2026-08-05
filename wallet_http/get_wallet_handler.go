@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/prime_sql"
 	"xwallet-server/users_sql"
 	"xwallet-server/wallet_sql"
 
@@ -13,10 +14,14 @@ import (
 
 type walletResponse struct {
 	Balance           float64 `json:"balance"`
+	LavxBalance       float64 `json:"lavxBalance"`
 	Profit24h         float64 `json:"profit24h"`
 	Profit7d          float64 `json:"profit7d"`
 	ActiveTradesCount int     `json:"activeTradesCount"`
 	WinRate           float64 `json:"winRate"`
+	PrimeTier         string  `json:"primeTier"`
+	FeeRatePercent    float64 `json:"feeRatePercent"`
+	MaxVoucherSlots   int     `json:"maxVoucherSlots"`
 }
 
 func GetWalletHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -45,13 +50,22 @@ func GetWalletHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 		}
 
+		tier, feeRate, err := prime_sql.GetEffectiveFeeRate(r.Context(), pool, wallet.UserID)
+		if err != nil {
+			feeRate = prime_sql.BaseFeeRatePercent
+		}
+
+		maxSlots := 5
+		if cfg, ok := prime_sql.Tiers[tier]; ok {
+			maxSlots = cfg.MaxVoucherSlots
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(walletResponse{
-			Balance:           wallet.Balance,
-			Profit24h:         wallet.Profit24h,
-			Profit7d:          wallet.Profit7d,
-			ActiveTradesCount: wallet.ActiveTradesCount,
-			WinRate:           wallet.WinRate,
+			Balance: wallet.Balance, LavxBalance: wallet.LavxBalance,
+			Profit24h: wallet.Profit24h, Profit7d: wallet.Profit7d,
+			ActiveTradesCount: wallet.ActiveTradesCount, WinRate: wallet.WinRate,
+			PrimeTier: tier, FeeRatePercent: feeRate, MaxVoucherSlots: maxSlots,
 		})
 	}
 }

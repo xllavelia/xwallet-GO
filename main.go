@@ -16,6 +16,7 @@ import (
 	"xwallet-server/db_connection"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
+	"xwallet-server/prime_http"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_http"
 	"xwallet-server/promo_sql"
@@ -172,6 +173,8 @@ func main() {
 	http.HandleFunc("/referral", auth_http.WithCORS(auth_http.RequireAuth(referral_http.GetReferralHandler(pool))))
 	http.HandleFunc("/referral/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(referral_http.DevAddXPHandler(pool))))
 	http.HandleFunc("/promo/redeem", auth_http.WithCORS(auth_http.RequireAuth(promo_http.RedeemHandler(pool))))
+	http.HandleFunc("/prime", auth_http.WithCORS(auth_http.RequireAuth(prime_http.GetPrimeStatusHandler(pool))))
+	http.HandleFunc("/prime/purchase", auth_http.WithCORS(auth_http.RequireAuth(prime_http.PurchaseHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

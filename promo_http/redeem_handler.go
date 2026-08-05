@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
@@ -88,6 +89,11 @@ func handleReferralRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.
 func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, code string, userID int) {
 	ctx := r.Context()
 
+	maxSlots, err := prime_sql.GetMaxVoucherSlots(ctx, pool, userID)
+	if err != nil {
+		maxSlots = 5
+	}
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		http.Error(w, "could not start redemption", http.StatusInternalServerError)
@@ -134,8 +140,8 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 			http.Error(w, "could not check voucher slots", http.StatusInternalServerError)
 			return
 		}
-		if slotCount >= 5 {
-			http.Error(w, "your voucher slots are full (5/5) - clear one and try again", http.StatusConflict)
+		if slotCount >= maxSlots {
+			http.Error(w, fmt.Sprintf("your voucher slots are full (%d/%d) - clear one and try again", slotCount, maxSlots), http.StatusConflict)
 			return
 		}
 	}
@@ -163,8 +169,6 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 		return
 	}
 
-	// Ваучерные типы дозавершаются вне транзакции — переиспользуют те же
-	// Grant*-функции, что и Battle Pass / dev-кнопки в Vouchers.
 	if err := tx.Commit(ctx); err != nil {
 		http.Error(w, "could not finalize redemption", http.StatusInternalServerError)
 		return
@@ -173,20 +177,20 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 	var message string
 	switch promo.RewardType {
 	case "usdt_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "usdt_credit", promo.RewardValue, "promo")
+		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "usdt_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: $%.2f USDT credit - claim it in Vouchers", promo.RewardValue)
 	case "lavx_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "lavx_credit", promo.RewardValue, "promo")
+		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "lavx_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: %.0f LAVX credit - claim it in Vouchers", promo.RewardValue)
 	case "ref_xp_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "ref_xp_credit", promo.RewardValue, "promo")
+		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "ref_xp_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: +%.0f Referral XP - claim it in Vouchers", promo.RewardValue)
 	case "fee_voucher":
 		durationSeconds := 345600
 		if promo.RewardDurationDays != nil {
 			durationSeconds = *promo.RewardDurationDays * 86400
 		}
-		err = user_vouchers_sql.GrantFeeDiscountVoucher(ctx, pool, userID, promo.RewardValue, durationSeconds, "promo")
+		err = user_vouchers_sql.GrantFeeDiscountVoucher(ctx, pool, userID, promo.RewardValue, durationSeconds, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: $%.2f fee-free trading - claim it in Vouchers", promo.RewardValue)
 	default:
 		http.Error(w, "this code has an unsupported reward type", http.StatusInternalServerError)

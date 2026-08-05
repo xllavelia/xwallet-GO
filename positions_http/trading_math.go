@@ -1,7 +1,5 @@
 package positions_http
 
-var TRADE_FEE_RATE = 0.01 // 1% от margin
-
 func CalcLiquidationPrice(entryPrice float64, leverage int, positionType string) float64 {
 	if positionType == "short" {
 		return entryPrice * (1 + 1/float64(leverage))
@@ -9,8 +7,8 @@ func CalcLiquidationPrice(entryPrice float64, leverage int, positionType string)
 	return entryPrice * (1 - 1/float64(leverage))
 }
 
-func CalcFeesOnMargin(margin float64) float64 {
-	return margin * TRADE_FEE_RATE
+func CalcFeesOnMargin(margin float64, feeRatePercent float64) float64 {
+	return margin * (feeRatePercent / 100)
 }
 
 func CalcPnl(margin float64, leverage int, entryPrice float64, currentPrice float64, positionType string) float64 {

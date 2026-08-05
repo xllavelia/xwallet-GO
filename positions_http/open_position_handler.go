@@ -8,6 +8,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/positions_sql"
+	"xwallet-server/prime_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
@@ -96,8 +97,14 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		_, feeRate, err := prime_sql.GetEffectiveFeeRate(r.Context(), pool, userID)
+		if err != nil {
+			http.Error(w, "could not determine fee rate", http.StatusInternalServerError)
+			return
+		}
+
 		margin := req.Amount / float64(req.Leverage)
-		fees := CalcFeesOnMargin(margin)
+		fees := CalcFeesOnMargin(margin, feeRate)
 		liqPrice := CalcLiquidationPrice(req.EntryPrice, req.Leverage, req.Type)
 
 		tx, err := pool.Begin(r.Context())

@@ -94,7 +94,7 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not create referral profile", http.StatusInternalServerError)
 			return
 		}
-		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome"); err != nil {
+		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome", 5); err != nil {
 			http.Error(w, "could not create welcome voucher", http.StatusInternalServerError)
 			return
 		}
