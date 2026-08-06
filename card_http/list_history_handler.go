@@ -20,16 +20,16 @@ type cardHistoryItem struct {
 	ToAmount      float64 `json:"toAmount"`
 	Price         float64 `json:"price"`
 	CreatedAt     string  `json:"createdAt"`
+	XpAwarded     int     `json:"xpAwarded"`
 }
 
 func toHistoryItem(e card_history_sql.CardHistoryEntry) cardHistoryItem {
 	return cardHistoryItem{
 		ID: e.ID, OperationType: e.OperationType, FromAsset: e.FromAsset, ToAsset: e.ToAsset,
 		FromAmount: e.FromAmount, ToAmount: e.ToAmount, Price: e.Price,
-		CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: e.CreatedAt.Format("2006-01-02T15:04:05Z"), XpAwarded: e.XpAwarded,
 	}
 }
-
 func ListCardHistoryHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authUser, ok := auth_http.UserFromContext(r)

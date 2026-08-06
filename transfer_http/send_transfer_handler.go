@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/users_sql"
 
@@ -18,14 +19,10 @@ type sendTransferRequest struct {
 
 func toDetailResponse(d transfer_sql.TransferDetail) map[string]interface{} {
 	return map[string]interface{}{
-		"id":                   d.ID,
-		"direction":            d.Direction,
-		"amount":               d.Amount,
-		"counterpartyUsername": d.CounterpartyUsername,
-		"counterpartyPlayerId": d.CounterpartyPlayerID,
-		"referenceCode":        d.ReferenceCode,
-		"status":               d.Status,
-		"createdAt":            d.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"id": d.ID, "direction": d.Direction, "amount": d.Amount,
+		"counterpartyUsername": d.CounterpartyUsername, "counterpartyPlayerId": d.CounterpartyPlayerID,
+		"referenceCode": d.ReferenceCode, "status": d.Status,
+		"createdAt": d.CreatedAt.Format("2006-01-02T15:04:05Z"), "xpAwarded": d.XpAwarded,
 	}
 }
 
@@ -35,13 +32,11 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		var req sendTransferRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -51,19 +46,16 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "amount must be positive", http.StatusBadRequest)
 			return
 		}
-
 		senderID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "sender not found", http.StatusNotFound)
 			return
 		}
-
 		recipientID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, req.RecipientPlayerID)
 		if err != nil {
 			http.Error(w, "recipient not found", http.StatusNotFound)
 			return
 		}
-
 		if senderID == recipientID {
 			http.Error(w, "cannot send to yourself", http.StatusBadRequest)
 			return
@@ -77,6 +69,11 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			http.Error(w, "transfer failed", http.StatusInternalServerError)
 			return
+		}
+
+		xpAwarded := battlepass_sql.AwardTransferXP(r.Context(), pool, senderID, req.Amount)
+		if xpAwarded > 0 {
+			transfer_sql.SetXpAwarded(r.Context(), pool, transferID, xpAwarded)
 		}
 
 		detail, err := transfer_sql.GetTransferDetail(r.Context(), pool, transferID, senderID)

@@ -12,4 +12,5 @@ type CardHistoryEntry struct {
 	ToAmount      float64
 	Price         float64
 	CreatedAt     time.Time
+	XpAwarded     int
 }

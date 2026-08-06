@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_http"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_http"
@@ -126,6 +127,15 @@ func main() {
 	if err := promo_sql.RealignSeedRewards(ctx, pool); err != nil {
 		log.Fatal("promo rewards realignment: ", err)
 	}
+	if err := battlepass_sql.MigrateBattlepassSchema(ctx, pool); err != nil {
+		log.Fatal("battlepass schema migration: ", err)
+	}
+	if err := battlepass_sql.MigrateXpAwardedColumns(ctx, pool); err != nil {
+		log.Fatal("xp_awarded columns migration: ", err)
+	}
+	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
+		log.Fatal("timed voucher types migration: ", err)
+	}
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
@@ -175,6 +185,11 @@ func main() {
 	http.HandleFunc("/promo/redeem", auth_http.WithCORS(auth_http.RequireAuth(promo_http.RedeemHandler(pool))))
 	http.HandleFunc("/prime", auth_http.WithCORS(auth_http.RequireAuth(prime_http.GetPrimeStatusHandler(pool))))
 	http.HandleFunc("/prime/purchase", auth_http.WithCORS(auth_http.RequireAuth(prime_http.PurchaseHandler(pool))))
+	http.HandleFunc("/battlepass", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.GetBattlePassHandler(pool))))
+	http.HandleFunc("/battlepass/claim", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.ClaimLevelHandler(pool))))
+	http.HandleFunc("/battlepass/open-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.OpenCaseHandler(pool))))
+	http.HandleFunc("/battlepass/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddXpHandler(pool))))
+	http.HandleFunc("/battlepass/dev-add-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddCaseHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

@@ -14,7 +14,6 @@ import (
 type activateRequest struct {
 	ID int `json:"id"`
 }
-
 type activateResponse struct {
 	VoucherType  string  `json:"voucherType"`
 	CreditAmount float64 `json:"creditAmount"`
@@ -26,33 +25,30 @@ func ActivateVoucherHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		var req activateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
 
-		affected, err := user_vouchers_sql.ActivateFeeVoucher(r.Context(), pool, req.ID, userID)
+		activatedType, activated, err := user_vouchers_sql.ActivateTimedVoucher(r.Context(), pool, req.ID, userID)
 		if err != nil {
 			http.Error(w, "could not activate voucher", http.StatusInternalServerError)
 			return
 		}
-		if affected {
+		if activated {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(activateResponse{VoucherType: "fee_discount"})
+			json.NewEncoder(w).Encode(activateResponse{VoucherType: activatedType})
 			return
 		}
 

@@ -118,8 +118,7 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if toAmount > 0 {
 			swapPrice = usdValue / req.FromAmount
 		}
-		card_history_sql.InsertEntryPool(r.Context(), pool, userID, "swap", req.FromAsset, req.ToAsset, req.FromAmount, toAmount, swapPrice)
-
+		card_history_sql.InsertEntryPool(r.Context(), pool, userID, "swap", req.FromAsset, req.ToAsset, req.FromAmount, toAmount, swapPrice, 0)
 		rate := 0.0
 
 		if req.FromAmount > 0 {

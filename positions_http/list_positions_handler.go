@@ -32,6 +32,7 @@ type positionListItem struct {
 	Result            *string  `json:"result"`
 	OpenedAt          string   `json:"openedAt"`
 	ClosedAt          *string  `json:"closedAt"`
+	XpAwarded         int      `json:"xpAwarded"`
 }
 
 func toListItem(p positions_sql.Position) positionListItem {
@@ -46,7 +47,7 @@ func toListItem(p positions_sql.Position) positionListItem {
 		Fees: p.Fees, FeesPaidByVoucher: p.FeesPaidByVoucher, LiqPrice: p.LiqPrice,
 		AutoClose: p.AutoClose, AutoCloseTarget: p.AutoCloseTarget, Pnl: p.Pnl,
 		PnlPercent: p.PnlPercent, Status: p.Status, Result: p.Result,
-		OpenedAt: p.OpenedAt.Format("2006-01-02T15:04:05Z"), ClosedAt: closedAt,
+		OpenedAt: p.OpenedAt.Format("2006-01-02T15:04:05Z"), ClosedAt: closedAt, XpAwarded: p.XpAwarded,
 	}
 }
 
@@ -57,24 +58,20 @@ func ListOpenPositionsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-
 		positions, err := positions_sql.GetOpenPositionsByUserID(r.Context(), pool, userID)
 		if err != nil {
 			http.Error(w, "could not load positions", http.StatusInternalServerError)
 			return
 		}
-
 		items := make([]positionListItem, 0, len(positions))
 		for _, p := range positions {
 			items = append(items, toListItem(p))
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(items)
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
@@ -17,13 +18,13 @@ type tradeRequest struct {
 	UsdAmount float64 `json:"usdAmount"`
 	Direction string  `json:"direction"`
 }
-
 type tradeResponse struct {
 	Coin       string  `json:"coin"`
 	Direction  string  `json:"direction"`
 	UsdAmount  float64 `json:"usdAmount"`
 	CoinAmount float64 `json:"coinAmount"`
 	Price      float64 `json:"price"`
+	XpAwarded  int     `json:"xpAwarded"`
 }
 
 func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -32,13 +33,11 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		var req tradeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -56,7 +55,6 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "direction must be 'buy' or 'sell'", http.StatusBadRequest)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
@@ -77,7 +75,6 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		} else {
 			moveErr = card_sql.ExecuteAssetMove(r.Context(), pool, userID, req.Coin, "USDT", coinAmount, req.UsdAmount)
 		}
-
 		if moveErr != nil {
 			if moveErr == card_sql.ErrInsufficientAssetBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
@@ -87,15 +84,18 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		var xpAwarded int
 		if req.Direction == "buy" {
-			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "buy", "USDT", req.Coin, req.UsdAmount, coinAmount, price)
+			xpAwarded = battlepass_sql.AwardCardBuyXP(r.Context(), pool, userID, req.UsdAmount)
+			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "buy", "USDT", req.Coin, req.UsdAmount, coinAmount, price, xpAwarded)
 		} else {
-			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "sell", req.Coin, "USDT", coinAmount, req.UsdAmount, price)
+			xpAwarded = battlepass_sql.AwardCardSellXP(r.Context(), pool, userID, req.UsdAmount)
+			card_history_sql.InsertEntryPool(r.Context(), pool, userID, "sell", req.Coin, "USDT", coinAmount, req.UsdAmount, price, xpAwarded)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(tradeResponse{
-			Coin: req.Coin, Direction: req.Direction, UsdAmount: req.UsdAmount, CoinAmount: coinAmount, Price: price,
+			Coin: req.Coin, Direction: req.Direction, UsdAmount: req.UsdAmount, CoinAmount: coinAmount, Price: price, XpAwarded: xpAwarded,
 		})
 	}
 }

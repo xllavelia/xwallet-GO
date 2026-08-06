@@ -24,4 +24,5 @@ type Position struct {
 	Result            *string
 	OpenedAt          time.Time
 	ClosedAt          *time.Time
+	XpAwarded         int
 }

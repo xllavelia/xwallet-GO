@@ -73,7 +73,6 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-
 		if req.Type != "long" && req.Type != "short" {
 			http.Error(w, "type must be 'long' or 'short'", http.StatusBadRequest)
 			return
@@ -101,6 +100,12 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, "could not determine fee rate", http.StatusInternalServerError)
 			return
+		}
+
+		boostPoints, _ := user_vouchers_sql.GetActiveFeeBoostPoints(r.Context(), pool, userID)
+		feeRate -= boostPoints / 10
+		if feeRate < 0 {
+			feeRate = 0
 		}
 
 		margin := req.Amount / float64(req.Leverage)
@@ -134,19 +139,10 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		totalRequired := margin + feesFromBalance
 
 		pos := positions_sql.Position{
-			TradeID:           generateTradeID(),
-			UserID:            userID,
-			Coin:              req.Coin,
-			Type:              req.Type,
-			EntryPrice:        req.EntryPrice,
-			Leverage:          req.Leverage,
-			Amount:            req.Amount,
-			Margin:            margin,
-			Fees:              fees,
-			FeesPaidByVoucher: feesPaidByVoucher,
-			LiqPrice:          liqPrice,
-			AutoClose:         req.AutoClose,
-			AutoCloseTarget:   req.AutoCloseTarget,
+			TradeID: generateTradeID(), UserID: userID, Coin: req.Coin, Type: req.Type,
+			EntryPrice: req.EntryPrice, Leverage: req.Leverage, Amount: req.Amount, Margin: margin,
+			Fees: fees, FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: liqPrice,
+			AutoClose: req.AutoClose, AutoCloseTarget: req.AutoCloseTarget,
 		}
 
 		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)
