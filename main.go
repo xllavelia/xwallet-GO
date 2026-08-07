@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"xwallet-server/admin_http"
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_http"
 	"xwallet-server/battlepass_sql"
@@ -158,7 +159,7 @@ func main() {
 	http.HandleFunc("/auth/register", auth_http.WithCORS(auth_http.RegisterHandler(pool)))
 	http.HandleFunc("/auth/login", auth_http.WithCORS(auth_http.LoginHandler(pool)))
 	http.HandleFunc("/auth/generate-id", auth_http.WithCORS(auth_http.GenerateIDHandler(pool)))
-	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler)))
+	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler(pool))))
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/positions/open", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenPositionHandler(pool))))
 	http.HandleFunc("/positions/close", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ClosePositionHandler(pool))))
@@ -190,6 +191,17 @@ func main() {
 	http.HandleFunc("/battlepass/open-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.OpenCaseHandler(pool))))
 	http.HandleFunc("/battlepass/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddXpHandler(pool))))
 	http.HandleFunc("/battlepass/dev-add-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddCaseHandler(pool))))
+	http.HandleFunc("/auth/change-password", auth_http.WithCORS(auth_http.RequireAuth(auth_http.ChangePasswordHandler(pool))))
+	http.HandleFunc("/auth/update-username", auth_http.WithCORS(auth_http.RequireAuth(auth_http.UpdateUsernameHandler(pool))))
+	http.HandleFunc("/admin/stats", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GetStatsHandler(pool)))))
+	http.HandleFunc("/admin/users", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.ListUsersHandler(pool)))))
+	http.HandleFunc("/admin/users/detail", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GetUserDetailHandler(pool)))))
+	http.HandleFunc("/admin/users/set-balance", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetBalanceHandler(pool)))))
+	http.HandleFunc("/admin/users/set-lavx", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetLavxHandler(pool)))))
+	http.HandleFunc("/admin/users/grant-status", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GrantStatusHandler(pool)))))
+	http.HandleFunc("/admin/users/revoke-status", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.RevokeStatusHandler(pool)))))
+	http.HandleFunc("/admin/users/set-admin", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetAdminHandler(pool)))))
+	http.HandleFunc("/admin/users/delete", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.DeleteUserHandler(pool)))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
