@@ -39,8 +39,8 @@ type caseConfig struct {
 }
 
 var caseConfigs = map[string]caseConfig{
-	"epic":      {10, 30, 1, 5, 2, 25, 50, false, 0.03, "lucky", "epic_cases"},
-	"mythic":    {20, 100, 5, 10, 3, 35, 100, false, 0.03, "young", "mythic_cases"},
+	"classico":  {10, 30, 1, 5, 2, 25, 50, false, 0.03, "lucky", "classico_cases"},
+	"elysium":   {20, 100, 5, 10, 3, 35, 100, false, 0.03, "young", "elysium_cases"},
 	"legendary": {50, 200, 10, 20, 5, 25, 50, true, 0.03, "saint", "legendary_cases"},
 }
 

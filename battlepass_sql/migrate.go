@@ -9,8 +9,8 @@ import (
 func MigrateBattlepassSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	sqlQuery := `
 	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS track VARCHAR(16);
-	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS epic_cases INT NOT NULL DEFAULT 0;
-	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS mythic_cases INT NOT NULL DEFAULT 0;
+	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS classico_cases INT NOT NULL DEFAULT 0;
+	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS elysium_cases INT NOT NULL DEFAULT 0;
 	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS legendary_cases INT NOT NULL DEFAULT 0;
 	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS last_transfer_xp_at TIMESTAMP;
 	ALTER TABLE battlepass_progress ADD COLUMN IF NOT EXISTS last_card_buy_xp_at TIMESTAMP;

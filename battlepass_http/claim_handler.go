@@ -47,7 +47,7 @@ func ClaimLevelHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		activeTier := ""
-		maxSlots := 5
+		maxSlots := prime_sql.DefaultVoucherSlots
 		if sub != nil {
 			activeTier = sub.Tier
 			if cfg, ok := prime_sql.Tiers[sub.Tier]; ok {

@@ -55,9 +55,9 @@ func GetWalletHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			feeRate = prime_sql.BaseFeeRatePercent
 		}
 
-		maxSlots := 5
-		if cfg, ok := prime_sql.Tiers[tier]; ok {
-			maxSlots = cfg.MaxVoucherSlots
+		maxSlots, err := prime_sql.GetMaxVoucherSlots(r.Context(), pool, wallet.UserID)
+		if err != nil {
+			maxSlots = prime_sql.DefaultVoucherSlots
 		}
 
 		w.Header().Set("Content-Type", "application/json")

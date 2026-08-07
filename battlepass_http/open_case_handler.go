@@ -38,7 +38,7 @@ func OpenCaseHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		maxSlots := 5
+		maxSlots := prime_sql.DefaultVoucherSlots
 		if sub, err := prime_sql.GetActiveSubscription(r.Context(), pool, userID); err == nil && sub != nil {
 			if cfg, ok := prime_sql.Tiers[sub.Tier]; ok {
 				maxSlots = cfg.MaxVoucherSlots

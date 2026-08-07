@@ -7,8 +7,8 @@ type Progress struct {
 	Track            *string
 	Xp               int
 	ClaimedLevels    []int
-	EpicCases        int
-	MythicCases      int
+	ClassicoCases    int
+	ElysiumCases     int
 	LegendaryCases   int
 	LastTransferXpAt *time.Time
 	LastCardBuyXpAt  *time.Time

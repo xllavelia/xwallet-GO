@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"xwallet-server/prime_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
@@ -94,7 +95,7 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not create referral profile", http.StatusInternalServerError)
 			return
 		}
-		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome", 5); err != nil {
+		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome", prime_sql.DefaultVoucherSlots); err != nil {
 			http.Error(w, "could not create welcome voucher", http.StatusInternalServerError)
 			return
 		}

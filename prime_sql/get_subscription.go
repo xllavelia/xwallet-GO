@@ -48,14 +48,14 @@ func GetEffectiveFeeRate(ctx context.Context, pool *pgxpool.Pool, userID int) (s
 func GetMaxVoucherSlots(ctx context.Context, pool *pgxpool.Pool, userID int) (int, error) {
 	sub, err := GetActiveSubscription(ctx, pool, userID)
 	if err != nil {
-		return 5, err
+		return DefaultVoucherSlots, err
 	}
 	if sub == nil {
-		return 5, nil
+		return DefaultVoucherSlots, nil
 	}
 	cfg, ok := Tiers[sub.Tier]
 	if !ok {
-		return 5, nil
+		return DefaultVoucherSlots, nil
 	}
 	return cfg.MaxVoucherSlots, nil
 }

@@ -23,19 +23,16 @@ func DevGrantHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		var req devGrantRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
@@ -44,7 +41,7 @@ func DevGrantHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		maxSlots, err := prime_sql.GetMaxVoucherSlots(r.Context(), pool, userID)
 		if err != nil {
-			maxSlots = 5
+			maxSlots = prime_sql.DefaultVoucherSlots
 		}
 
 		var grantErr error
@@ -65,7 +62,6 @@ func DevGrantHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not grant voucher", http.StatusInternalServerError)
 			return
 		}
-
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -77,18 +73,15 @@ func DevResetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-
 		if err := user_vouchers_sql.DeleteAllByUserID(r.Context(), pool, userID); err != nil {
 			http.Error(w, "could not reset vouchers", http.StatusInternalServerError)
 			return
 		}
-
 		w.WriteHeader(http.StatusOK)
 	}
 }

@@ -24,10 +24,10 @@ func GetProgress(ctx context.Context, pool *pgxpool.Pool, userID int, activeTier
 	var track *string
 	var claimedRaw []byte
 	err := pool.QueryRow(ctx, `
-		SELECT track, xp, claimed_tiers, epic_cases, mythic_cases, legendary_cases,
+		SELECT track, xp, claimed_tiers, classico_cases, elysium_cases, legendary_cases,
 		       last_transfer_xp_at, last_card_buy_xp_at, last_card_sell_xp_at
 		FROM battlepass_progress WHERE user_id = $1;
-	`, userID).Scan(&track, &p.Xp, &claimedRaw, &p.EpicCases, &p.MythicCases, &p.LegendaryCases,
+	`, userID).Scan(&track, &p.Xp, &claimedRaw, &p.ClassicoCases, &p.ElysiumCases, &p.LegendaryCases,
 		&p.LastTransferXpAt, &p.LastCardBuyXpAt, &p.LastCardSellXpAt)
 	if err != nil {
 		return Progress{}, err

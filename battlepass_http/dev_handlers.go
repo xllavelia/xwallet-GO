@@ -50,7 +50,7 @@ func DevAddCaseHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		rarity := r.URL.Query().Get("rarity")
-		if rarity != "epic" && rarity != "mythic" && rarity != "legendary" {
+		if rarity != "classico" && rarity != "elysium" && rarity != "legendary" {
 			http.Error(w, "invalid rarity", http.StatusBadRequest)
 			return
 		}

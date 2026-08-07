@@ -25,8 +25,8 @@ type statusResponse struct {
 	Xp             int             `json:"xp"`
 	XpPerLevel     int             `json:"xpPerLevel"`
 	Levels         []levelResponse `json:"levels"`
-	EpicCases      int             `json:"epicCases"`
-	MythicCases    int             `json:"mythicCases"`
+	ClassicoCases  int             `json:"classicoCases"`
+	ElysiumCases   int             `json:"elysiumCases"`
 	LegendaryCases int             `json:"legendaryCases"`
 	Statuses       []string        `json:"statuses"`
 }
@@ -63,7 +63,7 @@ func GetBattlePassHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		resp := statusResponse{
 			HasActiveTrack: progress.Track != nil, Xp: progress.Xp, XpPerLevel: battlepass_sql.XPPerLevel,
-			EpicCases: progress.EpicCases, MythicCases: progress.MythicCases, LegendaryCases: progress.LegendaryCases,
+			ClassicoCases: progress.ClassicoCases, ElysiumCases: progress.ElysiumCases, LegendaryCases: progress.LegendaryCases,
 			Statuses: statuses, Levels: []levelResponse{},
 		}
 

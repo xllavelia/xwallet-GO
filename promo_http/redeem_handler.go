@@ -91,7 +91,7 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 
 	maxSlots, err := prime_sql.GetMaxVoucherSlots(ctx, pool, userID)
 	if err != nil {
-		maxSlots = 5
+		maxSlots = prime_sql.DefaultVoucherSlots
 	}
 
 	tx, err := pool.Begin(ctx)
