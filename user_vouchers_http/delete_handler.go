@@ -31,13 +31,13 @@ func DeleteVoucherHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		affected, err := user_vouchers_sql.DeleteExpiredFeeVoucher(r.Context(), pool, id, userID)
+		affected, err := user_vouchers_sql.DeleteFeeVoucher(r.Context(), pool, id, userID)
 		if err != nil {
 			http.Error(w, "could not delete voucher", http.StatusInternalServerError)
 			return
 		}
 		if !affected {
-			http.Error(w, "voucher is not eligible for deletion", http.StatusBadRequest)
+			http.Error(w, "voucher is currently active and cannot be deleted", http.StatusBadRequest)
 			return
 		}
 

@@ -11,8 +11,7 @@ func GetByUserID(ctx context.Context, pool *pgxpool.Pool, userID int) ([]UserVou
 	SELECT id, user_id, voucher_type, status, limit_amount, used_amount, duration_seconds, activated_at, credit_amount, source, created_at
 	FROM user_vouchers
 	WHERE user_id = $1
-	ORDER BY created_at ASC
-	LIMIT 5;
+	ORDER BY created_at ASC;
 	`
 	rows, err := pool.Query(ctx, sqlQuery, userID)
 	if err != nil {
