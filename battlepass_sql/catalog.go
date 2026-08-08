@@ -32,7 +32,7 @@ var ProCatalog = []Level{
 		rc("usdt", 20, 0, ""),
 		rc("case", 1, 0, "classico"),
 		rc("fee_boost", 3, 10, ""),
-		rc("status", 0, 0, "force_pro"),
+		rc("status", 0, 0, "legacy"),
 	}},
 }
 
@@ -55,7 +55,7 @@ var PrimeCatalog = []Level{
 		rc("fee_boost", 5, 10, ""),
 		rc("lavx", 5, 0, ""),
 		rc("ref_xp", 20, 0, ""),
-		rc("status", 0, 0, "force_prime"),
+		rc("status", 0, 0, "rivender"),
 	}},
 }
 
@@ -77,7 +77,7 @@ var StarCatalog = []Level{
 	{15, []RewardComponent{
 		rc("case", 1, 0, "legendary"),
 		rc("case", 1, 0, "elysium"),
-		rc("status", 0, 0, "force_star"),
+		rc("status", 0, 0, "royal"),
 		rc("status", 0, 0, "legendary"),
 	}},
 }
