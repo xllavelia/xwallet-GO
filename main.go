@@ -74,9 +74,6 @@ func main() {
 	if err := referral_sql.MigrateReferralsSchema(ctx, pool); err != nil {
 		log.Fatal("referrals migration: ", err)
 	}
-	if err := user_vouchers_sql.MigrateVoucherTypesForRefXP(ctx, pool); err != nil {
-		log.Fatal("voucher ref_xp_credit migration: ", err)
-	}
 	if err := contacts_sql.EnableTrgmExtension(ctx, pool); err != nil {
 		log.Fatal("pg_trgm extension: ", err)
 	}
