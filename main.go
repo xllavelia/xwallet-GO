@@ -24,6 +24,8 @@ import (
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_http"
 	"xwallet-server/referral_sql"
+	"xwallet-server/savings_http"
+	"xwallet-server/savings_sql"
 	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/user_vouchers_http"
@@ -134,6 +136,9 @@ func main() {
 	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
 		log.Fatal("timed voucher types migration: ", err)
 	}
+	if err := savings_sql.CreateSavingsTables(ctx, pool); err != nil {
+		log.Fatal("savings tables: ", err)
+	}
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
@@ -199,6 +204,9 @@ func main() {
 	http.HandleFunc("/admin/users/revoke-status", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.RevokeStatusHandler(pool)))))
 	http.HandleFunc("/admin/users/set-admin", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetAdminHandler(pool)))))
 	http.HandleFunc("/admin/users/delete", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.DeleteUserHandler(pool)))))
+	http.HandleFunc("/savings", auth_http.WithCORS(auth_http.RequireAuth(savings_http.GetSavingsHandler(pool))))
+	http.HandleFunc("/savings/deposit", auth_http.WithCORS(auth_http.RequireAuth(savings_http.DepositHandler(pool))))
+	http.HandleFunc("/savings/withdraw", auth_http.WithCORS(auth_http.RequireAuth(savings_http.WithdrawHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -208,6 +216,7 @@ func main() {
 		port = "8080"
 	}
 	positions_http.StartLiquidationWorker(pool)
+	savings_sql.StartInterestWorker(pool)
 	log.Println("Auth server running on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
