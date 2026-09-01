@@ -9,7 +9,8 @@ import (
 func DeleteFeeVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID int) (bool, error) {
 	sqlQuery := `
 	DELETE FROM user_vouchers
-	WHERE id = $1 AND user_id = $2 AND voucher_type = 'fee_discount'
+	WHERE id = $1 AND user_id = $2
+	  AND voucher_type IN ('fee_discount', 'xp_boost', 'fee_boost')
 	  AND (
 	    status = 'inactive'
 	    OR (status = 'active' AND activated_at + (duration_seconds || ' seconds')::interval < now())
