@@ -25,4 +25,7 @@ type Position struct {
 	OpenedAt          time.Time
 	ClosedAt          *time.Time
 	XpAwarded         int
+	FundingKind       string
+	FundingCardID     *int
+	CashbackAwarded   float64
 }

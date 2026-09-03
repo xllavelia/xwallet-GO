@@ -6,7 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
-	"time"
+
+	"xwallet-server/bankcards_sql"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,53 +23,71 @@ func generateReferenceCode() (string, error) {
 	return strings.ToUpper(hex.EncodeToString(b)), nil
 }
 
-func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, recipientUserID int, amount float64) (int, error) {
+func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, recipientUserID int, amount float64) (int, float64, error) {
+	senderSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, senderUserID)
+	if err != nil {
+		return 0, 0, err
+	}
+	recipientSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, recipientUserID)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	feePercent := bankcards_sql.BaseTransferFeePercent
+	if senderSource.Kind == "card" {
+		if tier, tErr := bankcards_sql.GetCardTier(ctx, pool, senderSource.CardID); tErr == nil {
+			if cfg, ok := bankcards_sql.Tiers[tier]; ok {
+				feePercent = cfg.TransferFeePercent
+			}
+		}
+	}
+	fee := amount * (feePercent / 100)
+	totalDebit := amount + fee
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback(ctx)
 
-	var newSenderBalance float64
-	err = tx.QueryRow(ctx, `
-		UPDATE wallets SET balance = balance - $1, updated_at = now()
-		WHERE user_id = $2 AND balance >= $1
-		RETURNING balance;
-	`, amount, senderUserID).Scan(&newSenderBalance)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, ErrInsufficientBalance
+	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, senderSource, -totalDebit); err != nil {
+		if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
+			return 0, 0, ErrInsufficientBalance
 		}
-		return 0, err
+		return 0, 0, err
 	}
-
-	_, err = tx.Exec(ctx, `
-		UPDATE wallets SET balance = balance + $1, updated_at = now()
-		WHERE user_id = $2;
-	`, amount, recipientUserID)
-	if err != nil {
-		return 0, err
+	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, recipientSource, amount); err != nil {
+		return 0, 0, err
 	}
 
 	refCode, err := generateReferenceCode()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+
+	var senderCardID, recipientCardID interface{}
+	if senderSource.Kind == "card" {
+		senderCardID = senderSource.CardID
+	}
+	if recipientSource.Kind == "card" {
+		recipientCardID = recipientSource.CardID
 	}
 
 	var transferID int
 	err = tx.QueryRow(ctx, `
-		INSERT INTO transfers (sender_id, recipient_id, amount, status, reference_code)
-		VALUES ($1, $2, $3, 'completed', $4)
+		INSERT INTO transfers (sender_id, recipient_id, amount, status, reference_code, fee_amount, sender_card_id, recipient_card_id)
+		VALUES ($1, $2, $3, 'completed', $4, $5, $6, $7)
 		RETURNING id;
-	`, senderUserID, recipientUserID, amount, refCode).Scan(&transferID)
+	`, senderUserID, recipientUserID, amount, refCode, fee, senderCardID, recipientCardID).Scan(&transferID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	_ = time.Now() // (created_at читается отдельно через GetTransferDetail)
-	return transferID, nil
+	return transferID, fee, nil
 }
+
+var _ = pgx.ErrNoRows

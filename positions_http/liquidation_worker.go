@@ -3,12 +3,12 @@ package positions_http
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"time"
 
 	"xwallet-server/positions_sql"
+	"xwallet-server/priceoracle"
 	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,45 +24,7 @@ var liquidationHTTPClient = &http.Client{
 }
 
 func fetchPrices(coins []string) (map[string]float64, error) {
-	symbols := make([]string, len(coins))
-	for i, c := range coins {
-		symbols[i] = c + "USDT"
-	}
-
-	symbolsJSON, _ := json.Marshal(symbols)
-	url := "https://api.binance.com/api/v3/ticker/price?symbols=" + string(symbolsJSON)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := liquidationHTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		log.Println("liquidation worker: binance non-200 status", resp.StatusCode, "body:", string(body))
-		return nil, err
-	}
-
-	var tickers []binanceTicker
-	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
-		return nil, err
-	}
-
-	prices := make(map[string]float64)
-	for _, t := range tickers {
-		coin := t.Symbol[:len(t.Symbol)-4]
-		prices[coin] = parsePrice(t.Price)
-	}
-
-	return prices, nil
+	return priceoracle.GetAll(coins), nil
 }
 
 func parsePrice(s string) float64 {

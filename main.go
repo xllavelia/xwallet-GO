@@ -8,6 +8,8 @@ import (
 
 	"xwallet-server/admin_http"
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_http"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_history_sql"
@@ -16,8 +18,10 @@ import (
 	"xwallet-server/contacts_http"
 	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
+	"xwallet-server/home_http"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
+	"xwallet-server/priceoracle"
 	"xwallet-server/prime_http"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_http"
@@ -136,6 +140,9 @@ func main() {
 	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
 		log.Fatal("timed voucher types migration: ", err)
 	}
+	if err := bankcards_sql.MigrateBankCardsSchema(ctx, pool); err != nil {
+		log.Fatal("bank cards migration: ", err)
+	}
 	if err := savings_sql.CreateSavingsTables(ctx, pool); err != nil {
 		log.Fatal("savings tables: ", err)
 	}
@@ -207,6 +214,13 @@ func main() {
 	http.HandleFunc("/savings", auth_http.WithCORS(auth_http.RequireAuth(savings_http.GetSavingsHandler(pool))))
 	http.HandleFunc("/savings/deposit", auth_http.WithCORS(auth_http.RequireAuth(savings_http.DepositHandler(pool))))
 	http.HandleFunc("/savings/withdraw", auth_http.WithCORS(auth_http.RequireAuth(savings_http.WithdrawHandler(pool))))
+	http.HandleFunc("/bankcards", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ListHandler(pool))))
+	http.HandleFunc("/bankcards/open", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.OpenHandler(pool))))
+	http.HandleFunc("/bankcards/topup", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.TopUpHandler(pool))))
+	http.HandleFunc("/bankcards/select-active", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SelectActiveHandler(pool))))
+	http.HandleFunc("/bankcards/close", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CloseHandler(pool))))
+	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))
+	http.HandleFunc("/home/summary", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetSummaryHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -215,6 +229,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	priceoracle.Start()
+	bankcards_sql.StartLavxWorker(pool)
 	positions_http.StartLiquidationWorker(pool)
 	savings_sql.StartInterestWorker(pool)
 	log.Println("Auth server running on :" + port)

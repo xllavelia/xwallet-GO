@@ -7,12 +7,12 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
-	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -104,7 +104,22 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		boostPoints, _ := user_vouchers_sql.GetActiveFeeBoostPoints(r.Context(), pool, userID)
 		feeRate -= boostPoints / 10
-		if feeRate < 0 {
+
+		fundingSource, err := bankcards_sql.ResolveFundingSource(r.Context(), pool, userID)
+		if err != nil {
+			http.Error(w, "could not resolve funding source", http.StatusInternalServerError)
+			return
+		}
+		var cardTier string
+		var feeFullyWaived bool
+		if fundingSource.Kind == "card" {
+			cardTier, _ = bankcards_sql.GetCardTier(r.Context(), pool, fundingSource.CardID)
+			if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
+				feeRate -= cfg.FeeReductionPoints / 10
+				feeFullyWaived = cfg.FeeFullyWaived
+			}
+		}
+		if feeRate < 0 || feeFullyWaived {
 			feeRate = 0
 		}
 
@@ -143,6 +158,7 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			EntryPrice: req.EntryPrice, Leverage: req.Leverage, Amount: req.Amount, Margin: margin,
 			Fees: fees, FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: liqPrice,
 			AutoClose: req.AutoClose, AutoCloseTarget: req.AutoCloseTarget,
+			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),
 		}
 
 		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)
@@ -151,8 +167,8 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		if err := wallet_sql.AdjustBalanceTx(r.Context(), tx, userID, -totalRequired); err != nil {
-			if errors.Is(err, wallet_sql.ErrInsufficientBalanceTx) {
+		if err := bankcards_sql.AdjustFundingBalance(r.Context(), tx, fundingSource, -totalRequired); err != nil {
+			if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
 				return
 			}
@@ -185,4 +201,12 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			OpenedAt: created.OpenedAt.Format("2006-01-02T15:04:05Z"),
 		})
 	}
+}
+
+func fundingCardIDPtr(s bankcards_sql.FundingSource) *int {
+	if s.Kind != "card" {
+		return nil
+	}
+	id := s.CardID
+	return &id
 }

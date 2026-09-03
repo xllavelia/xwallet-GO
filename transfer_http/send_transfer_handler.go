@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/users_sql"
@@ -13,8 +14,9 @@ import (
 )
 
 type sendTransferRequest struct {
-	RecipientPlayerID string  `json:"recipientPlayerId"`
-	Amount            float64 `json:"amount"`
+	RecipientPlayerID   string  `json:"recipientPlayerId"`
+	RecipientCardNumber string  `json:"recipientCardNumber"`
+	Amount              float64 `json:"amount"`
 }
 
 func toDetailResponse(d transfer_sql.TransferDetail) map[string]interface{} {
@@ -51,17 +53,19 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "sender not found", http.StatusNotFound)
 			return
 		}
-		recipientID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, req.RecipientPlayerID)
-		if err != nil {
-			http.Error(w, "recipient not found", http.StatusNotFound)
-			return
+		var recipientID int
+		if req.RecipientCardNumber != "" {
+			recipientID, _, err = bankcards_sql.ResolveByCardNumber(r.Context(), pool, req.RecipientCardNumber)
+		} else {
+			recipientID, err = users_sql.GetInternalIDByPlayerID(r.Context(), pool, req.RecipientPlayerID)
 		}
 		if senderID == recipientID {
 			http.Error(w, "cannot send to yourself", http.StatusBadRequest)
 			return
 		}
 
-		transferID, err := transfer_sql.ExecuteTransfer(r.Context(), pool, senderID, recipientID, req.Amount)
+		transferID, feeAmount, err := transfer_sql.ExecuteTransfer(r.Context(), pool, senderID, recipientID, req.Amount)
+		_ = feeAmount
 		if err != nil {
 			if err == transfer_sql.ErrInsufficientBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)

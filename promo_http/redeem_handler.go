@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_sql"
@@ -159,8 +160,10 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 	if promo.RewardType == "usdt" {
 		if _, err := tx.Exec(ctx, `UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2;`, promo.RewardValue, userID); err != nil {
 			http.Error(w, "could not credit balance", http.StatusInternalServerError)
+			bankcards_sql.LogVoucherClaim(ctx, tx, userID, "usdt_credit", promo.RewardValue, "promo")
 			return
 		}
+
 		if err := tx.Commit(ctx); err != nil {
 			http.Error(w, "could not finalize redemption", http.StatusInternalServerError)
 			return

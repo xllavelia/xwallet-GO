@@ -3,6 +3,7 @@ package user_vouchers_sql
 import (
 	"context"
 	"errors"
+	"xwallet-server/bankcards_sql"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,6 +26,7 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 		WHERE id = $1 AND user_id = $2 AND voucher_type IN ('usdt_credit', 'lavx_credit', 'ref_xp_credit')
 		RETURNING voucher_type, credit_amount;
 	`, id, userID).Scan(&voucherType, &amount)
+	bankcards_sql.LogVoucherClaim(ctx, tx, userID, voucherType, amount, "battlepass_or_promo")
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", 0, ErrVoucherNotFound

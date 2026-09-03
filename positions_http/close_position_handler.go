@@ -6,10 +6,11 @@ import (
 	"strconv"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
+	"xwallet-server/prime_sql"
 	"xwallet-server/users_sql"
-	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -18,7 +19,8 @@ type closePositionRequest struct {
 	ClosePrice float64 `json:"closePrice"`
 }
 type closePositionResponse struct {
-	XpAwarded int `json:"xpAwarded"`
+	XpAwarded       int     `json:"xpAwarded"`
+	CashbackAwarded float64 `json:"cashbackAwarded"`
 }
 
 func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -32,19 +34,14 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		idStr := r.URL.Query().Get("id")
-		id, err := strconv.Atoi(idStr)
+		id, err := strconv.Atoi(r.URL.Query().Get("id"))
 		if err != nil {
 			http.Error(w, "invalid position id", http.StatusBadRequest)
 			return
 		}
 		var req closePositionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-		if req.ClosePrice <= 0 {
-			http.Error(w, "invalid close price", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ClosePrice <= 0 {
+			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
 
@@ -70,6 +67,29 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			result = "loss"
 		}
 
+		fundingSource := bankcards_sql.FundingSource{Kind: pos.FundingKind, UserID: userID}
+		if pos.FundingKind == "card" && pos.FundingCardID != nil {
+			fundingSource.CardID = *pos.FundingCardID
+		} else {
+			fundingSource.Kind = "wallet"
+		}
+
+		cashback := 0.0
+		if pnl > 0 && fundingSource.Kind == "card" {
+			cardTier, tierErr := bankcards_sql.GetCardTier(r.Context(), pool, fundingSource.CardID)
+			if tierErr == nil {
+				if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
+					rate := cfg.CashbackPercent
+					if cardTier == "saint" {
+						if primeSub, _ := prime_sql.GetActiveSubscription(r.Context(), pool, userID); primeSub != nil {
+							rate = cfg.CashbackPercentPrime
+						}
+					}
+					cashback = pnl * (rate / 100)
+				}
+			}
+		}
+
 		tx, err := pool.Begin(r.Context())
 		if err != nil {
 			http.Error(w, "could not start transaction", http.StatusInternalServerError)
@@ -77,11 +97,11 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer tx.Rollback(r.Context())
 
-		if err := positions_sql.ClosePositionTx(r.Context(), tx, id, req.ClosePrice, pnl, pnlPercent, result); err != nil {
+		if err := positions_sql.ClosePositionTx(r.Context(), tx, id, req.ClosePrice, pnl, pnlPercent, result, cashback); err != nil {
 			http.Error(w, "could not close position", http.StatusInternalServerError)
 			return
 		}
-		if err := wallet_sql.AdjustBalanceTx(r.Context(), tx, userID, pos.Margin+pnl); err != nil {
+		if err := bankcards_sql.AdjustFundingBalance(r.Context(), tx, fundingSource, pos.Margin+pnl+cashback); err != nil {
 			http.Error(w, "could not update balance", http.StatusInternalServerError)
 			return
 		}
@@ -90,13 +110,13 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		xpAwarded := battlepass_sql.AwardTradeXP(r.Context(), pool, userID, pnl)
+		xpAwarded := battlepass_sql.AwardTradeXP(r.Context(), pool, userID, pnl, fundingSource)
 		if xpAwarded > 0 {
 			positions_sql.SetXpAwarded(r.Context(), pool, id, xpAwarded)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(closePositionResponse{XpAwarded: xpAwarded})
+		json.NewEncoder(w).Encode(closePositionResponse{XpAwarded: xpAwarded, CashbackAwarded: cashback})
 	}
 }
