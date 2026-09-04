@@ -146,6 +146,9 @@ func main() {
 	if err := savings_sql.CreateSavingsTables(ctx, pool); err != nil {
 		log.Fatal("savings tables: ", err)
 	}
+	if err := user_vouchers_sql.MigrateClaimsLogWidth(ctx, pool); err != nil {
+		log.Fatal("voucher claims log width migration: ", err)
+	}
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
@@ -221,6 +224,7 @@ func main() {
 	http.HandleFunc("/bankcards/close", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CloseHandler(pool))))
 	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))
 	http.HandleFunc("/home/summary", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetSummaryHandler(pool))))
+	http.HandleFunc("/bankcards/search", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SearchHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

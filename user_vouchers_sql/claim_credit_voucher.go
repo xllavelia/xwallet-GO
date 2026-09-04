@@ -3,6 +3,7 @@ package user_vouchers_sql
 import (
 	"context"
 	"errors"
+
 	"xwallet-server/bankcards_sql"
 
 	"github.com/jackc/pgx/v5"
@@ -20,13 +21,13 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 
 	var voucherType string
 	var amount float64
+	var originSource string
 
 	err = tx.QueryRow(ctx, `
 		DELETE FROM user_vouchers
 		WHERE id = $1 AND user_id = $2 AND voucher_type IN ('usdt_credit', 'lavx_credit', 'ref_xp_credit')
-		RETURNING voucher_type, credit_amount;
-	`, id, userID).Scan(&voucherType, &amount)
-	bankcards_sql.LogVoucherClaim(ctx, tx, userID, voucherType, amount, "battlepass_or_promo")
+		RETURNING voucher_type, credit_amount, source;
+	`, id, userID).Scan(&voucherType, &amount, &originSource)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", 0, ErrVoucherNotFound
@@ -42,6 +43,10 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 		_, err = tx.Exec(ctx, `UPDATE referrals SET ref_xp = ref_xp + $1 WHERE user_id = $2;`, int(amount), userID)
 	}
 	if err != nil {
+		return "", 0, err
+	}
+
+	if err := bankcards_sql.LogVoucherClaim(ctx, tx, userID, voucherType, amount, originSource); err != nil {
 		return "", 0, err
 	}
 

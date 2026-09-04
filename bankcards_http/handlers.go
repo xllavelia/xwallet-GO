@@ -31,19 +31,14 @@ type cardResponse struct {
 	Balance            float64 `json:"balance"`
 	IsActiveForTrading bool    `json:"isActiveForTrading"`
 	OpenedAt           string  `json:"openedAt"`
+	CashbackThisMonth  float64 `json:"cashbackThisMonth"`
 }
 
 type listResponse struct {
-	Cards    []cardResponse `json:"cards"`
-	Catalog  []tierResponse `json:"catalog"`
-	MaxCards int            `json:"maxCards"`
-}
-
-func toCardResponse(c bankcards_sql.Card) cardResponse {
-	return cardResponse{
-		ID: c.ID, Tier: c.Tier, CardNumber: c.CardNumber, Balance: c.Balance,
-		IsActiveForTrading: c.IsActiveForTrading, OpenedAt: c.OpenedAt.Format("2006-01-02T15:04:05Z"),
-	}
+	Cards                  []cardResponse `json:"cards"`
+	Catalog                []tierResponse `json:"catalog"`
+	MaxCards               int            `json:"maxCards"`
+	TotalCashbackThisMonth float64        `json:"totalCashbackThisMonth"`
 }
 
 func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -64,9 +59,33 @@ func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		cashbackByCard := map[int]float64{}
+		var totalCashback float64
+		rows, err := pool.Query(r.Context(), `
+			SELECT funding_card_id, COALESCE(SUM(cashback_awarded),0)
+			FROM positions
+			WHERE user_id = $1 AND status = 'closed' AND funding_kind = 'card'
+			  AND funding_card_id IS NOT NULL AND closed_at >= date_trunc('month', now())
+			GROUP BY funding_card_id;
+		`, userID)
+		if err == nil {
+			for rows.Next() {
+				var cid int
+				var amt float64
+				rows.Scan(&cid, &amt)
+				cashbackByCard[cid] = amt
+				totalCashback += amt
+			}
+			rows.Close()
+		}
+
 		items := make([]cardResponse, 0, len(cards))
 		for _, c := range cards {
-			items = append(items, toCardResponse(c))
+			items = append(items, cardResponse{
+				ID: c.ID, Tier: c.Tier, CardNumber: c.CardNumber, Balance: c.Balance,
+				IsActiveForTrading: c.IsActiveForTrading, OpenedAt: c.OpenedAt.Format("2006-01-02T15:04:05Z"),
+				CashbackThisMonth: cashbackByCard[c.ID],
+			})
 		}
 
 		catalog := make([]tierResponse, 0, len(bankcards_sql.TierOrder))
@@ -82,7 +101,10 @@ func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(listResponse{Cards: items, Catalog: catalog, MaxCards: bankcards_sql.MaxCardsPerUser})
+		json.NewEncoder(w).Encode(listResponse{
+			Cards: items, Catalog: catalog, MaxCards: bankcards_sql.MaxCardsPerUser,
+			TotalCashbackThisMonth: totalCashback,
+		})
 	}
 }
 
@@ -111,7 +133,6 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-
 		card, err := bankcards_sql.OpenCard(r.Context(), pool, userID, req.Tier)
 		if err != nil {
 			switch err {
@@ -126,9 +147,11 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(toCardResponse(card))
+		json.NewEncoder(w).Encode(cardResponse{
+			ID: card.ID, Tier: card.Tier, CardNumber: card.CardNumber, Balance: card.Balance,
+			IsActiveForTrading: card.IsActiveForTrading, OpenedAt: card.OpenedAt.Format("2006-01-02T15:04:05Z"),
+		})
 	}
 }
 
@@ -248,5 +271,45 @@ func ResolveHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"username": username})
+	}
+}
+
+type cardSearchItem struct {
+	CardNumber string `json:"cardNumber"`
+	Username   string `json:"username"`
+	PlayerID   string `json:"playerId"`
+	Tier       string `json:"tier"`
+}
+
+func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authUser, ok := auth_http.UserFromContext(r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		prefix := r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		if len(prefix) == 0 {
+			json.NewEncoder(w).Encode([]cardSearchItem{})
+			return
+		}
+		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
+		if err != nil {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		results, err := bankcards_sql.SearchCardsByPrefix(r.Context(), pool, prefix, userID)
+		if err != nil {
+			http.Error(w, "search failed", http.StatusInternalServerError)
+			return
+		}
+		items := make([]cardSearchItem, 0, len(results))
+		for _, res := range results {
+			items = append(items, cardSearchItem{
+				CardNumber: res.CardNumber, Username: res.Username, PlayerID: res.PlayerID, Tier: res.Tier,
+			})
+		}
+		json.NewEncoder(w).Encode(items)
 	}
 }

@@ -11,12 +11,12 @@ import (
 func StartInterestWorker(pool *pgxpool.Pool) {
 	go func() {
 		runAccrualPass(pool)
-		ticker := time.NewTicker(1 * time.Hour)
-		for range ticker.C {
+		t := time.NewTicker(10 * time.Minute)
+		for range t.C {
 			runAccrualPass(pool)
 		}
 	}()
-	log.Println("savings interest worker started (hourly)")
+	log.Println("savings interest worker started (checks every 10min, accrues hourly)")
 }
 
 type accrualRow struct {
@@ -37,20 +37,19 @@ func runAccrualPass(pool *pgxpool.Pool) {
 	var accounts []accrualRow
 	for rows.Next() {
 		var r accrualRow
-		if err := rows.Scan(&r.userID, &r.balance, &r.lastAccruedAt); err != nil {
-			continue
+		if err := rows.Scan(&r.userID, &r.balance, &r.lastAccruedAt); err == nil {
+			accounts = append(accounts, r)
 		}
-		accounts = append(accounts, r)
 	}
 	rows.Close()
 
 	for _, acc := range accounts {
-		days := int(time.Since(acc.lastAccruedAt).Hours() / 24)
-		if days < 1 {
+		hoursElapsed := time.Since(acc.lastAccruedAt).Hours()
+		if hoursElapsed < 1 {
 			continue
 		}
 
-		interest := acc.balance * (AnnualInterestRatePercent / 100) * float64(days) / 365
+		interest := acc.balance * (AnnualInterestRatePercent / 100) * hoursElapsed / (365 * 24)
 		if interest <= 0 {
 			continue
 		}
@@ -60,16 +59,11 @@ func runAccrualPass(pool *pgxpool.Pool) {
 			continue
 		}
 
-		_, err = tx.Exec(ctx, `
-			UPDATE savings_accounts
-			SET balance = balance + $1, last_accrued_at = last_accrued_at + ($2 || ' days')::interval
-			WHERE user_id = $3;
-		`, interest, days, acc.userID)
+		_, err = tx.Exec(ctx, `UPDATE savings_accounts SET balance = balance + $1, last_accrued_at = now() WHERE user_id = $2;`, interest, acc.userID)
 		if err != nil {
 			tx.Rollback(ctx)
 			continue
 		}
-
 		_, err = tx.Exec(ctx, `INSERT INTO savings_history (user_id, entry_type, amount) VALUES ($1, 'interest', $2);`, acc.userID, interest)
 		if err != nil {
 			tx.Rollback(ctx)
@@ -78,6 +72,8 @@ func runAccrualPass(pool *pgxpool.Pool) {
 
 		if err := tx.Commit(ctx); err != nil {
 			log.Println("savings worker: commit failed for user", acc.userID, err)
+		} else {
+			log.Println("savings worker: accrued", interest, "for user", acc.userID)
 		}
 	}
 }

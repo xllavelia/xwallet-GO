@@ -9,7 +9,6 @@ import (
 
 	"xwallet-server/bankcards_sql"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,7 +32,9 @@ func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, 
 		return 0, 0, err
 	}
 
-	feePercent := bankcards_sql.BaseTransferFeePercent
+	// Комиссия применяется ТОЛЬКО если у отправителя есть активная карта.
+	// Без карты — перевод бесплатный.
+	feePercent := 1.0
 	if senderSource.Kind == "card" {
 		if tier, tErr := bankcards_sql.GetCardTier(ctx, pool, senderSource.CardID); tErr == nil {
 			if cfg, ok := bankcards_sql.Tiers[tier]; ok {
@@ -89,5 +90,3 @@ func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, 
 
 	return transferID, fee, nil
 }
-
-var _ = pgx.ErrNoRows
