@@ -5,28 +5,17 @@ import (
 	"errors"
 	"fmt"
 
+	"xwallet-server/bankcards_sql"
+
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrInsufficientAssetBalance = errors.New("insufficient balance")
 
-func ExecuteAssetMove(ctx context.Context, pool *pgxpool.Pool, userID int, fromAsset string, toAsset string, fromAmount float64, toAmount float64) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
+func ExecuteAssetMove(ctx context.Context, q bankcards_sql.Queryer, fundingSource bankcards_sql.FundingSource, fromAsset string, toAsset string, fromAmount float64, toAmount float64) error {
 	if fromAsset == "USDT" {
-		var newBalance float64
-		err := tx.QueryRow(ctx, `
-			UPDATE wallets SET balance = balance - $1, updated_at = now()
-			WHERE user_id = $2 AND balance >= $1
-			RETURNING balance;
-		`, fromAmount, userID).Scan(&newBalance)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+		if err := bankcards_sql.AdjustFundingBalance(ctx, q, fundingSource, -fromAmount); err != nil {
+			if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
 				return ErrInsufficientAssetBalance
 			}
 			return err
@@ -42,7 +31,7 @@ func ExecuteAssetMove(ctx context.Context, pool *pgxpool.Pool, userID int, fromA
 			RETURNING %s;
 		`, column, column, column, column)
 		var newAmount float64
-		err := tx.QueryRow(ctx, sqlQuery, fromAmount, userID).Scan(&newAmount)
+		err := q.QueryRow(ctx, sqlQuery, fromAmount, fundingSource.UserID).Scan(&newAmount)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrInsufficientAssetBalance
@@ -52,11 +41,7 @@ func ExecuteAssetMove(ctx context.Context, pool *pgxpool.Pool, userID int, fromA
 	}
 
 	if toAsset == "USDT" {
-		_, err := tx.Exec(ctx, `
-			UPDATE wallets SET balance = balance + $1, updated_at = now()
-			WHERE user_id = $2;
-		`, toAmount, userID)
-		if err != nil {
+		if err := bankcards_sql.AdjustFundingBalance(ctx, q, fundingSource, toAmount); err != nil {
 			return err
 		}
 	} else {
@@ -65,11 +50,10 @@ func ExecuteAssetMove(ctx context.Context, pool *pgxpool.Pool, userID int, fromA
 			return fmt.Errorf("unsupported coin: %s", toAsset)
 		}
 		sqlQuery := fmt.Sprintf(`UPDATE crypto_cards SET %s = %s + $1 WHERE user_id = $2;`, column, column)
-		_, err := tx.Exec(ctx, sqlQuery, toAmount, userID)
-		if err != nil {
+		if _, err := q.Exec(ctx, sqlQuery, toAmount, fundingSource.UserID); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit(ctx)
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
@@ -69,11 +70,17 @@ func TradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		price := prices[req.Coin]
 		coinAmount := req.UsdAmount / price
 
+		fundingSource, err := bankcards_sql.ResolveFundingSource(r.Context(), pool, userID)
+		if err != nil {
+			http.Error(w, "could not resolve funding source", http.StatusInternalServerError)
+			return
+		}
+
 		var moveErr error
 		if req.Direction == "buy" {
-			moveErr = card_sql.ExecuteAssetMove(r.Context(), pool, userID, "USDT", req.Coin, req.UsdAmount, coinAmount)
+			moveErr = card_sql.ExecuteAssetMove(r.Context(), pool, fundingSource, "USDT", req.Coin, req.UsdAmount, coinAmount)
 		} else {
-			moveErr = card_sql.ExecuteAssetMove(r.Context(), pool, userID, req.Coin, "USDT", coinAmount, req.UsdAmount)
+			moveErr = card_sql.ExecuteAssetMove(r.Context(), pool, fundingSource, req.Coin, "USDT", coinAmount, req.UsdAmount)
 		}
 		if moveErr != nil {
 			if moveErr == card_sql.ErrInsufficientAssetBalance {

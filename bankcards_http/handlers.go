@@ -22,11 +22,13 @@ type tierResponse struct {
 	LavxPerMonth         float64 `json:"lavxPerMonth"`
 	XpBonusPercent       float64 `json:"xpBonusPercent"`
 	TransferFeePercent   float64 `json:"transferFeePercent"`
+	PatternSeed          string  `json:"patternSeed"`
 }
 
 type cardResponse struct {
 	ID                 int     `json:"id"`
 	Tier               string  `json:"tier"`
+	PatternSeed        string  `json:"patternSeed"`
 	CardNumber         string  `json:"cardNumber"`
 	Balance            float64 `json:"balance"`
 	IsActiveForTrading bool    `json:"isActiveForTrading"`
@@ -95,7 +97,7 @@ func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				ID: cfg.ID, Name: cfg.Name, OpenPriceUsd: cfg.OpenPriceUsd,
 				CashbackPercent: cfg.CashbackPercent, CashbackPercentPrime: cfg.CashbackPercentPrime,
 				FeeReductionPoints: cfg.FeeReductionPoints, FeeFullyWaived: cfg.FeeFullyWaived,
-				LavxPerMonth: cfg.LavxPerMonth, XpBonusPercent: cfg.XpBonusPercent,
+				LavxPerMonth: cfg.LavxPerMonth, XpBonusPercent: cfg.XpBonusPercent, PatternSeed: cfg.PatternSeed,
 				TransferFeePercent: cfg.TransferFeePercent,
 			})
 		}
@@ -138,8 +140,8 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			switch err {
 			case bankcards_sql.ErrTierNotFound:
 				http.Error(w, "invalid tier", http.StatusBadRequest)
-			case bankcards_sql.ErrMaxCardsReached:
-				http.Error(w, "maximum of 3 cards reached", http.StatusConflict)
+			case bankcards_sql.ErrTierAlreadyOwned:
+				http.Error(w, "you already own this card tier", http.StatusConflict)
 			case bankcards_sql.ErrInsufficientWalletBalance:
 				http.Error(w, "insufficient wallet balance", http.StatusPaymentRequired)
 			default:

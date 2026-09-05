@@ -11,6 +11,7 @@ import (
 
 var ErrTierNotFound = errors.New("tier not found")
 var ErrMaxCardsReached = errors.New("maximum number of cards reached")
+var ErrTierAlreadyOwned = errors.New("you already own a card of this tier")
 var ErrInsufficientWalletBalance = errors.New("insufficient wallet balance")
 var ErrCardNotFound = errors.New("card not found")
 
@@ -52,12 +53,12 @@ func OpenCard(ctx context.Context, pool *pgxpool.Pool, userID int, tier string) 
 		return Card{}, ErrTierNotFound
 	}
 
-	var count int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM bank_cards WHERE user_id = $1;`, userID).Scan(&count); err != nil {
+	var alreadyOwnsTier bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM bank_cards WHERE user_id = $1 AND tier = $2);`, userID, tier).Scan(&alreadyOwnsTier); err != nil {
 		return Card{}, err
 	}
-	if count >= MaxCardsPerUser {
-		return Card{}, ErrMaxCardsReached
+	if alreadyOwnsTier {
+		return Card{}, ErrTierAlreadyOwned
 	}
 
 	tx, err := pool.Begin(ctx)

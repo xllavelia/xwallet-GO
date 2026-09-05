@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
@@ -17,7 +18,6 @@ type swapRequest struct {
 	ToAsset    string  `json:"toAsset"`
 	FromAmount float64 `json:"fromAmount"`
 }
-
 type swapResponse struct {
 	FromAsset  string  `json:"fromAsset"`
 	ToAsset    string  `json:"toAsset"`
@@ -36,13 +36,11 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-
 		var req swapRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -60,7 +58,6 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "amount must be positive", http.StatusBadRequest)
 			return
 		}
-
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)
@@ -104,7 +101,13 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			toAmount = usdValue / toPrice
 		}
 
-		moveErr := card_sql.ExecuteAssetMove(r.Context(), pool, userID, req.FromAsset, req.ToAsset, req.FromAmount, toAmount)
+		fundingSource, err := bankcards_sql.ResolveFundingSource(r.Context(), pool, userID)
+		if err != nil {
+			http.Error(w, "could not resolve funding source", http.StatusInternalServerError)
+			return
+		}
+
+		moveErr := card_sql.ExecuteAssetMove(r.Context(), pool, fundingSource, req.FromAsset, req.ToAsset, req.FromAmount, toAmount)
 		if moveErr != nil {
 			if moveErr == card_sql.ErrInsufficientAssetBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
@@ -115,12 +118,12 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		swapPrice := 0.0
-		if toAmount > 0 {
+		if req.FromAmount > 0 {
 			swapPrice = usdValue / req.FromAmount
 		}
 		card_history_sql.InsertEntryPool(r.Context(), pool, userID, "swap", req.FromAsset, req.ToAsset, req.FromAmount, toAmount, swapPrice, 0)
-		rate := 0.0
 
+		rate := 0.0
 		if req.FromAmount > 0 {
 			rate = toAmount / req.FromAmount
 		}

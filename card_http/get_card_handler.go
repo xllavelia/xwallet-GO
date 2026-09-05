@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/bankcards_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
 
@@ -19,11 +20,12 @@ type assetResponse struct {
 }
 
 type cardResponse struct {
-	CardNumber string          `json:"cardNumber"`
-	Holder     string          `json:"holder"`
-	ValidThru  string          `json:"validThru"`
-	BalanceUsd float64         `json:"balanceUsd"`
-	Assets     []assetResponse `json:"assets"`
+	CardNumber  string          `json:"cardNumber"`
+	Holder      string          `json:"holder"`
+	ValidThru   string          `json:"validThru"`
+	BalanceUsd  float64         `json:"balanceUsd"`
+	Assets      []assetResponse `json:"assets"`
+	UsdtBalance float64         `json:"usdtBalance"`
 }
 
 var coinOrder = []string{"BTC", "ETH", "SOL", "TON"}
@@ -65,13 +67,20 @@ func GetCardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			"BTC": card.BtcAmount, "ETH": card.EthAmount, "SOL": card.SolAmount, "TON": card.TonAmount,
 		}
 
-		totalUsd := 0.0
+		fundingSource, fsErr := bankcards_sql.ResolveFundingSource(r.Context(), pool, userID)
+		usdtBalance := 0.0
+		if fsErr == nil {
+			usdtBalance, _ = bankcards_sql.GetFundingBalance(r.Context(), pool, fundingSource)
+		}
+
+		cryptoUsd := 0.0
 		values := map[string]float64{}
 		for _, coin := range coinOrder {
 			v := amounts[coin] * prices[coin]
 			values[coin] = v
-			totalUsd += v
+			cryptoUsd += v
 		}
+		totalUsd := cryptoUsd + usdtBalance
 
 		assets := make([]assetResponse, 0, 4)
 		for _, coin := range coinOrder {
@@ -86,11 +95,12 @@ func GetCardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cardResponse{
-			CardNumber: card.CardNumber,
-			Holder:     authUser.Username,
-			ValidThru:  card.ValidThru.Format("01/06"),
-			BalanceUsd: totalUsd,
-			Assets:     assets,
+			CardNumber:  card.CardNumber,
+			Holder:      authUser.Username,
+			ValidThru:   card.ValidThru.Format("01/06"),
+			BalanceUsd:  totalUsd,
+			Assets:      assets,
+			UsdtBalance: usdtBalance,
 		})
 	}
 }

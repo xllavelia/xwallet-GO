@@ -11,17 +11,18 @@ type TierConfig struct {
 	LavxPerMonth         float64
 	XpBonusPercent       float64
 	TransferFeePercent   float64
+	PatternSeed          string
 }
 
 var BaseTransferFeePercent = 1.0
 
 var Tiers = map[string]TierConfig{
-	"standard": {ID: "standard", Name: "Standard", OpenPriceUsd: 0, TransferFeePercent: 1},
-	"classico": {ID: "classico", Name: "Classico", OpenPriceUsd: 200, CashbackPercent: 1, FeeReductionPoints: 1, LavxPerMonth: 5, XpBonusPercent: 10, TransferFeePercent: 7},
-	"cobalt":   {ID: "cobalt", Name: "Cobalt", OpenPriceUsd: 500, CashbackPercent: 3, FeeReductionPoints: 3, LavxPerMonth: 10, XpBonusPercent: 20, TransferFeePercent: 5},
-	"astro":    {ID: "astro", Name: "Astro", OpenPriceUsd: 700, CashbackPercent: 5, FeeReductionPoints: 5, LavxPerMonth: 15, XpBonusPercent: 30, TransferFeePercent: 3},
-	"saint":    {ID: "saint", Name: "Saint", OpenPriceUsd: 1500, CashbackPercent: 10, CashbackPercentPrime: 15, FeeFullyWaived: true, LavxPerMonth: 20, XpBonusPercent: 50, TransferFeePercent: 0},
+	"standard": {ID: "standard", Name: "Standard", OpenPriceUsd: 0, TransferFeePercent: 1, PatternSeed: "diagonal"},
+	"classico": {ID: "classico", Name: "Classico", OpenPriceUsd: 200, CashbackPercent: 1, FeeReductionPoints: 1, LavxPerMonth: 5, XpBonusPercent: 10, TransferFeePercent: 0.7, PatternSeed: "waves"},
+	"cobalt":   {ID: "cobalt", Name: "Cobalt", OpenPriceUsd: 500, CashbackPercent: 3, FeeReductionPoints: 3, LavxPerMonth: 10, XpBonusPercent: 20, TransferFeePercent: 0.5, PatternSeed: "dots"},
+	"astro":    {ID: "astro", Name: "Astro", OpenPriceUsd: 700, CashbackPercent: 5, FeeReductionPoints: 5, LavxPerMonth: 15, XpBonusPercent: 30, TransferFeePercent: 0.3, PatternSeed: "stars"},
+	"saint":    {ID: "saint", Name: "Saint", OpenPriceUsd: 1500, CashbackPercent: 10, CashbackPercentPrime: 15, FeeFullyWaived: true, LavxPerMonth: 20, XpBonusPercent: 50, TransferFeePercent: 0, PatternSeed: "grid"},
 }
 
 var TierOrder = []string{"standard", "classico", "cobalt", "astro", "saint"}
-var MaxCardsPerUser = 3
+var MaxCardsPerUser = 5
