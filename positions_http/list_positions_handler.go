@@ -33,6 +33,7 @@ type positionListItem struct {
 	OpenedAt          string   `json:"openedAt"`
 	ClosedAt          *string  `json:"closedAt"`
 	XpAwarded         int      `json:"xpAwarded"`
+	CashbackAwarded   float64  `json:"cashbackAwarded"`
 }
 
 func toListItem(p positions_sql.Position) positionListItem {
@@ -48,6 +49,7 @@ func toListItem(p positions_sql.Position) positionListItem {
 		AutoClose: p.AutoClose, AutoCloseTarget: p.AutoCloseTarget, Pnl: p.Pnl,
 		PnlPercent: p.PnlPercent, Status: p.Status, Result: p.Result,
 		OpenedAt: p.OpenedAt.Format("2006-01-02T15:04:05Z"), ClosedAt: closedAt, XpAwarded: p.XpAwarded,
+		CashbackAwarded: p.CashbackAwarded,
 	}
 }
 

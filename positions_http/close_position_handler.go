@@ -2,6 +2,7 @@ package positions_http
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -89,7 +90,9 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				}
 			}
 		}
-
+		if cashback > 0 {
+			log.Println("cashback awarded:", cashback, "for user", userID, "on card", fundingSource.CardID)
+		}
 		tx, err := pool.Begin(r.Context())
 		if err != nil {
 			http.Error(w, "could not start transaction", http.StatusInternalServerError)

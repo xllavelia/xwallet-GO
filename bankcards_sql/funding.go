@@ -73,3 +73,19 @@ func GetFundingBalance(ctx context.Context, q Queryer, source FundingSource) (fl
 	err := q.QueryRow(ctx, `SELECT balance FROM wallets WHERE user_id = $1;`, source.UserID).Scan(&bal)
 	return bal, err
 }
+
+func ResolveAnyCard(ctx context.Context, q Queryer, userID int) (FundingSource, error) {
+	var cardID int
+	err := q.QueryRow(ctx, `
+		SELECT id FROM bank_cards WHERE user_id = $1
+		ORDER BY is_active_for_trading DESC, opened_at DESC
+		LIMIT 1;
+	`, userID).Scan(&cardID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return FundingSource{Kind: "wallet", UserID: userID}, nil
+		}
+		return FundingSource{}, err
+	}
+	return FundingSource{Kind: "card", CardID: cardID, UserID: userID}, nil
+}

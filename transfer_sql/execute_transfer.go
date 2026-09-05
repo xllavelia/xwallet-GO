@@ -23,18 +23,19 @@ func generateReferenceCode() (string, error) {
 }
 
 func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, recipientUserID int, amount float64) (int, float64, error) {
-	senderSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, senderUserID)
+	senderSource, err := bankcards_sql.ResolveAnyCard(ctx, pool, senderUserID)
 	if err != nil {
 		return 0, 0, err
 	}
-	recipientSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, recipientUserID)
+	recipientSource, err := bankcards_sql.ResolveAnyCard(ctx, pool, recipientUserID)
 	if err != nil {
 		return 0, 0, err
 	}
 
-	// Комиссия применяется ТОЛЬКО если у отправителя есть активная карта.
-	// Без карты — перевод бесплатный.
-	feePercent := 1.0
+	// Базовая ставка — если у отправителя вообще нет карты.
+	// Если карта есть (любая) — берём её персональный TransferFeePercent,
+	// который у Standard равен базовой 1%, а у платных тиров ниже/нулевой.
+	feePercent := bankcards_sql.BaseTransferFeePercent
 	if senderSource.Kind == "card" {
 		if tier, tErr := bankcards_sql.GetCardTier(ctx, pool, senderSource.CardID); tErr == nil {
 			if cfg, ok := bankcards_sql.Tiers[tier]; ok {
