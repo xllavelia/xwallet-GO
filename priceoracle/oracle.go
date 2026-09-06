@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,6 +14,8 @@ var SupportedCoins = []string{"BTC", "ETH", "SOL", "TON"}
 
 var mu sync.RWMutex
 var cache = map[string]float64{}
+var currentInterval = 6 * time.Second
+var maxInterval = 5 * time.Minute
 
 var client = &http.Client{Timeout: 8 * time.Second}
 
@@ -23,16 +26,26 @@ type ticker struct {
 
 func Start() {
 	go func() {
-		tick()
-		t := time.NewTicker(6 * time.Second)
-		for range t.C {
-			tick()
+		for {
+			ok := tick()
+			mu.Lock()
+			if ok {
+				currentInterval = 6 * time.Second
+			} else if currentInterval < maxInterval {
+				currentInterval *= 2
+				if currentInterval > maxInterval {
+					currentInterval = maxInterval
+				}
+			}
+			wait := currentInterval
+			mu.Unlock()
+			time.Sleep(wait)
 		}
 	}()
-	log.Println("price oracle started (single shared Binance poller, every 6s)")
+	log.Println("price oracle started (single shared Binance poller, backoff on rate limit)")
 }
 
-func tick() {
+func tick() bool {
 	symbols := make([]string, len(SupportedCoins))
 	for i, c := range SupportedCoins {
 		symbols[i] = c + "USDT"
@@ -42,26 +55,29 @@ func tick() {
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return
+		return false
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Println("price oracle: fetch failed, keeping stale cache:", err)
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		log.Println("price oracle: non-200 status", resp.StatusCode, string(body))
-		return
+		if resp.StatusCode == 418 || resp.StatusCode == 429 {
+			log.Println("price oracle: rate limited, backing off")
+		}
+		return false
 	}
 
 	var tickers []ticker
 	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
-		return
+		return false
 	}
 
 	mu.Lock()
@@ -74,6 +90,8 @@ func tick() {
 		}
 	}
 	mu.Unlock()
+
+	return true
 }
 
 func Get(coin string) (float64, bool) {
@@ -94,3 +112,5 @@ func GetAll(coins []string) map[string]float64 {
 	}
 	return out
 }
+
+var _ = strings.TrimSpace

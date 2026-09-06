@@ -48,30 +48,40 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "amount must be positive", http.StatusBadRequest)
 			return
 		}
+
 		senderID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "sender not found", http.StatusNotFound)
 			return
 		}
+
 		var recipientID int
 		if req.RecipientCardNumber != "" {
 			recipientID, _, err = bankcards_sql.ResolveByCardNumber(r.Context(), pool, req.RecipientCardNumber)
+			if err != nil {
+				http.Error(w, "no user found with this card number", http.StatusNotFound)
+				return
+			}
 		} else {
 			recipientID, err = users_sql.GetInternalIDByPlayerID(r.Context(), pool, req.RecipientPlayerID)
+			if err != nil {
+				http.Error(w, "recipient not found", http.StatusNotFound)
+				return
+			}
 		}
+
 		if senderID == recipientID {
 			http.Error(w, "cannot send to yourself", http.StatusBadRequest)
 			return
 		}
 
 		transferID, feeAmount, err := transfer_sql.ExecuteTransfer(r.Context(), pool, senderID, recipientID, req.Amount)
-		_ = feeAmount
 		if err != nil {
 			if err == transfer_sql.ErrInsufficientBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
 				return
 			}
-			http.Error(w, "transfer failed", http.StatusInternalServerError)
+			http.Error(w, "transfer failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -89,5 +99,6 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(toDetailResponse(detail))
+		_ = feeAmount
 	}
 }

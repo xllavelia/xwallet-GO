@@ -11,17 +11,18 @@ type CardSearchResult struct {
 	Username   string
 	PlayerID   string
 	Tier       string
+	IsOwnCard  bool
 }
 
-func SearchCardsByPrefix(ctx context.Context, pool *pgxpool.Pool, prefix string, excludeUserID int) ([]CardSearchResult, error) {
+func SearchCardsByPrefix(ctx context.Context, pool *pgxpool.Pool, prefix string, requestingUserID int) ([]CardSearchResult, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT bc.card_number, u.username, u.player_id, bc.tier
+		SELECT bc.card_number, u.username, u.player_id, bc.tier, (bc.user_id = $2)
 		FROM bank_cards bc
 		JOIN users u ON u.id = bc.user_id
-		WHERE bc.card_number LIKE $1 || '%' AND bc.user_id != $2
-		ORDER BY u.username ASC
+		WHERE bc.card_number LIKE $1 || '%'
+		ORDER BY (bc.user_id = $2) DESC, u.username ASC
 		LIMIT 9;
-	`, prefix, excludeUserID)
+	`, prefix, requestingUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +31,7 @@ func SearchCardsByPrefix(ctx context.Context, pool *pgxpool.Pool, prefix string,
 	result := []CardSearchResult{}
 	for rows.Next() {
 		var r CardSearchResult
-		if err := rows.Scan(&r.CardNumber, &r.Username, &r.PlayerID, &r.Tier); err != nil {
+		if err := rows.Scan(&r.CardNumber, &r.Username, &r.PlayerID, &r.Tier, &r.IsOwnCard); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
