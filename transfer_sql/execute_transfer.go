@@ -23,6 +23,9 @@ func generateReferenceCode() (string, error) {
 }
 
 func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, recipientUserID int, amount float64) (int, float64, error) {
+	if senderUserID == recipientUserID {
+		return 0, 0, errors.New("cannot send to yourself")
+	}
 	senderSource, err := bankcards_sql.ResolveAnyCard(ctx, pool, senderUserID)
 	if err != nil {
 		return 0, 0, err

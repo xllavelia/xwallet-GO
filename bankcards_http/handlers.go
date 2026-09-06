@@ -281,6 +281,7 @@ type cardSearchItem struct {
 	Username   string `json:"username"`
 	PlayerID   string `json:"playerId"`
 	Tier       string `json:"tier"`
+	IsOwnCard  bool   `json:"isOwnCard"`
 }
 
 func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -309,7 +310,7 @@ func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		items := make([]cardSearchItem, 0, len(results))
 		for _, res := range results {
 			items = append(items, cardSearchItem{
-				CardNumber: res.CardNumber, Username: res.Username, PlayerID: res.PlayerID, Tier: res.Tier,
+				IsOwnCard: res.IsOwnCard, CardNumber: res.CardNumber, Username: res.Username, PlayerID: res.PlayerID, Tier: res.Tier,
 			})
 		}
 		json.NewEncoder(w).Encode(items)
