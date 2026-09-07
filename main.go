@@ -30,6 +30,9 @@ import (
 	"xwallet-server/referral_sql"
 	"xwallet-server/savings_http"
 	"xwallet-server/savings_sql"
+	"xwallet-server/stockoracle"
+	"xwallet-server/stocks_http"
+	"xwallet-server/stocks_sql"
 	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/user_vouchers_http"
@@ -140,6 +143,9 @@ func main() {
 	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
 		log.Fatal("timed voucher types migration: ", err)
 	}
+	if err := stocks_sql.MigrateStocksSchema(ctx, pool); err != nil {
+		log.Fatal("stocks schema migration: ", err)
+	}
 	if err := bankcards_sql.MigrateBankCardsSchema(ctx, pool); err != nil {
 		log.Fatal("bank cards migration: ", err)
 	}
@@ -225,6 +231,11 @@ func main() {
 	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))
 	http.HandleFunc("/home/summary", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetSummaryHandler(pool))))
 	http.HandleFunc("/bankcards/search", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SearchHandler(pool))))
+	http.HandleFunc("/stocks/catalog", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.CatalogHandler(pool))))
+	http.HandleFunc("/stocks/chart", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.ChartHandler(pool))))
+	http.HandleFunc("/stocks/portfolio", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.PortfolioHandler(pool))))
+	http.HandleFunc("/stocks/buy", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.BuyHandler(pool))))
+	http.HandleFunc("/stocks/sell", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.SellHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -233,6 +244,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	stockoracle.Start()
 	priceoracle.Start()
 	bankcards_sql.StartLavxWorker(pool)
 	positions_http.StartLiquidationWorker(pool)
