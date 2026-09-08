@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const BettingDuration = 10 * time.Second
+const BettingDuration = 20 * time.Second
 const GrowthRate = 0.09
-const StartMultiplier = 0.9
-const MaxMultiplier = 10.0
+const StartMultiplier = 0.5
+const MaxMultiplier = 5.0
 
 var mu sync.RWMutex
 var pool *pgxpool.Pool

@@ -5,7 +5,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 )
@@ -14,7 +13,8 @@ var SupportedCoins = []string{"BTC", "ETH", "SOL", "TON"}
 
 var mu sync.RWMutex
 var cache = map[string]float64{}
-var currentInterval = 6 * time.Second
+var lastSuccessAt time.Time
+var currentInterval = 10 * time.Second
 var maxInterval = 5 * time.Minute
 
 var client = &http.Client{Timeout: 8 * time.Second}
@@ -30,7 +30,8 @@ func Start() {
 			ok := tick()
 			mu.Lock()
 			if ok {
-				currentInterval = 6 * time.Second
+				currentInterval = 10 * time.Second
+				lastSuccessAt = time.Now()
 			} else if currentInterval < maxInterval {
 				currentInterval *= 2
 				if currentInterval > maxInterval {
@@ -42,7 +43,7 @@ func Start() {
 			time.Sleep(wait)
 		}
 	}()
-	log.Println("price oracle started (single shared Binance poller, backoff on rate limit)")
+	log.Println("price oracle started (crypto, single poller, backoff on rate limit)")
 }
 
 func tick() bool {
@@ -61,7 +62,7 @@ func tick() bool {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("price oracle: fetch failed, keeping stale cache:", err)
+		log.Println("price oracle: fetch failed:", err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -69,19 +70,20 @@ func tick() bool {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		log.Println("price oracle: non-200 status", resp.StatusCode, string(body))
-		if resp.StatusCode == 418 || resp.StatusCode == 429 {
-			log.Println("price oracle: rate limited, backing off")
-		}
 		return false
 	}
 
 	var tickers []ticker
 	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
+		log.Println("price oracle: decode failed:", err)
 		return false
 	}
 
 	mu.Lock()
 	for _, t := range tickers {
+		if len(t.Symbol) <= 4 {
+			continue
+		}
 		coin := t.Symbol[:len(t.Symbol)-4]
 		var price float64
 		json.Unmarshal([]byte(t.Price), &price)
@@ -113,4 +115,8 @@ func GetAll(coins []string) map[string]float64 {
 	return out
 }
 
-var _ = strings.TrimSpace
+func HasAnyData() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return len(cache) > 0
+}
