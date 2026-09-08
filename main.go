@@ -28,6 +28,9 @@ import (
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_http"
 	"xwallet-server/referral_sql"
+	"xwallet-server/rocket_engine"
+	"xwallet-server/rocket_http"
+	"xwallet-server/rocket_sql"
 	"xwallet-server/savings_http"
 	"xwallet-server/savings_sql"
 	"xwallet-server/stockoracle"
@@ -152,6 +155,9 @@ func main() {
 	if err := savings_sql.CreateSavingsTables(ctx, pool); err != nil {
 		log.Fatal("savings tables: ", err)
 	}
+	if err := rocket_sql.MigrateRocketSchema(ctx, pool); err != nil {
+		log.Fatal("rocket schema migration: ", err)
+	}
 	if err := user_vouchers_sql.MigrateClaimsLogWidth(ctx, pool); err != nil {
 		log.Fatal("voucher claims log width migration: ", err)
 	}
@@ -236,6 +242,9 @@ func main() {
 	http.HandleFunc("/stocks/portfolio", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.PortfolioHandler(pool))))
 	http.HandleFunc("/stocks/buy", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.BuyHandler(pool))))
 	http.HandleFunc("/stocks/sell", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.SellHandler(pool))))
+	http.HandleFunc("/rocket/state", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.StateHandler(pool))))
+	http.HandleFunc("/rocket/bet", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.BetHandler(pool))))
+	http.HandleFunc("/rocket/cashout", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.CashoutHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -244,7 +253,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
+	rocket_engine.Start(pool)
 	stockoracle.Start()
 	priceoracle.Start()
 	bankcards_sql.StartLavxWorker(pool)
