@@ -13,9 +13,9 @@ var SupportedCoins = []string{"BTC", "ETH", "SOL", "TON"}
 
 var mu sync.RWMutex
 var cache = map[string]float64{}
-var lastSuccessAt time.Time
-var currentInterval = 10 * time.Second
-var maxInterval = 5 * time.Minute
+var currentInterval = 25 * time.Second
+var maxInterval = 20 * time.Minute
+var consecutiveFailures = 0
 
 var client = &http.Client{Timeout: 8 * time.Second}
 
@@ -30,16 +30,23 @@ func Start() {
 			ok := tick()
 			mu.Lock()
 			if ok {
-				currentInterval = 10 * time.Second
-				lastSuccessAt = time.Now()
-			} else if currentInterval < maxInterval {
-				currentInterval *= 2
-				if currentInterval > maxInterval {
-					currentInterval = maxInterval
+				currentInterval = 25 * time.Second
+				consecutiveFailures = 0
+			} else {
+				consecutiveFailures++
+				if currentInterval < maxInterval {
+					currentInterval *= 2
+					if currentInterval > maxInterval {
+						currentInterval = maxInterval
+					}
 				}
 			}
 			wait := currentInterval
+			fails := consecutiveFailures
 			mu.Unlock()
+			if fails > 0 {
+				log.Println("price oracle: waiting", wait, "before next attempt (failures so far:", fails, ")")
+			}
 			time.Sleep(wait)
 		}
 	}()
@@ -113,10 +120,4 @@ func GetAll(coins []string) map[string]float64 {
 		}
 	}
 	return out
-}
-
-func HasAnyData() bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return len(cache) > 0
 }

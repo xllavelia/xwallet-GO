@@ -57,10 +57,9 @@ func GetCardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 		}
 
-		prices, err := fetchLivePrices(coinOrder)
-		if err != nil {
-			http.Error(w, "could not fetch live prices", http.StatusInternalServerError)
-			return
+		prices, priceErr := fetchLivePrices(coinOrder)
+		if priceErr != nil {
+			prices = map[string]float64{}
 		}
 
 		amounts := map[string]float64{
