@@ -11,96 +11,102 @@ import (
 
 var SupportedCoins = []string{"BTC", "ETH", "SOL", "TON"}
 
+var yahooSymbolFor = map[string]string{
+	"BTC": "BTC-USD",
+	"ETH": "ETH-USD",
+	"SOL": "SOL-USD",
+	"TON": "TON11419-USD",
+}
+
 var mu sync.RWMutex
 var cache = map[string]float64{}
-var currentInterval = 25 * time.Second
-var maxInterval = 20 * time.Minute
-var consecutiveFailures = 0
+var currentInterval = 20 * time.Second
+var maxInterval = 5 * time.Minute
 
 var client = &http.Client{Timeout: 8 * time.Second}
-
-type ticker struct {
-	Symbol string `json:"symbol"`
-	Price  string `json:"price"`
-}
 
 func Start() {
 	go func() {
 		for {
-			ok := tick()
+			ok := tickAll()
 			mu.Lock()
 			if ok {
-				currentInterval = 25 * time.Second
-				consecutiveFailures = 0
-			} else {
-				consecutiveFailures++
-				if currentInterval < maxInterval {
-					currentInterval *= 2
-					if currentInterval > maxInterval {
-						currentInterval = maxInterval
-					}
+				currentInterval = 20 * time.Second
+			} else if currentInterval < maxInterval {
+				currentInterval *= 2
+				if currentInterval > maxInterval {
+					currentInterval = maxInterval
 				}
 			}
 			wait := currentInterval
-			fails := consecutiveFailures
 			mu.Unlock()
-			if fails > 0 {
-				log.Println("price oracle: waiting", wait, "before next attempt (failures so far:", fails, ")")
-			}
 			time.Sleep(wait)
 		}
 	}()
-	log.Println("price oracle started (crypto, single poller, backoff on rate limit)")
+	log.Println("price oracle started (crypto via Yahoo Finance, same scheme as stocks)")
 }
 
-func tick() bool {
-	symbols := make([]string, len(SupportedCoins))
-	for i, c := range SupportedCoins {
-		symbols[i] = c + "USDT"
-	}
-	symbolsJSON, _ := json.Marshal(symbols)
-	url := "https://api.binance.com/api/v3/ticker/price?symbols=" + string(symbolsJSON)
+type chartMetaResponse struct {
+	Chart struct {
+		Result []struct {
+			Meta struct {
+				RegularMarketPrice float64 `json:"regularMarketPrice"`
+			} `json:"meta"`
+		} `json:"result"`
+	} `json:"chart"`
+}
 
+func fetchOne(coin string, yahooSymbol string) (float64, bool) {
+	url := "https://query1.finance.yahoo.com/v8/finance/chart/" + yahooSymbol + "?range=1d&interval=1d"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return false
+		return 0, false
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("price oracle: fetch failed:", err)
-		return false
+		return 0, false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		log.Println("price oracle: non-200 status", resp.StatusCode, string(body))
-		return false
+		log.Println("price oracle: non-200 for", coin, resp.StatusCode, string(body))
+		return 0, false
 	}
 
-	var tickers []ticker
-	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
-		log.Println("price oracle: decode failed:", err)
-		return false
+	var parsed chartMetaResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return 0, false
 	}
+	if len(parsed.Chart.Result) == 0 {
+		return 0, false
+	}
+	price := parsed.Chart.Result[0].Meta.RegularMarketPrice
+	if price <= 0 {
+		return 0, false
+	}
+	return price, true
+}
 
-	mu.Lock()
-	for _, t := range tickers {
-		if len(t.Symbol) <= 4 {
+func tickAll() bool {
+	anySuccess := false
+	for _, coin := range SupportedCoins {
+		yahooSym, ok := yahooSymbolFor[coin]
+		if !ok {
 			continue
 		}
-		coin := t.Symbol[:len(t.Symbol)-4]
-		var price float64
-		json.Unmarshal([]byte(t.Price), &price)
-		if price > 0 {
+		price, ok := fetchOne(coin, yahooSym)
+		if ok {
+			mu.Lock()
 			cache[coin] = price
+			mu.Unlock()
+			anySuccess = true
 		}
+		time.Sleep(300 * time.Millisecond)
 	}
-	mu.Unlock()
-
-	return true
+	return anySuccess
 }
 
 func Get(coin string) (float64, bool) {

@@ -19,6 +19,8 @@ import (
 	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
 	"xwallet-server/home_http"
+	"xwallet-server/p2p_http"
+	"xwallet-server/p2p_sql"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
 	"xwallet-server/priceoracle"
@@ -164,7 +166,9 @@ func main() {
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
-
+	if err := p2p_sql.MigrateP2PSchema(ctx, pool); err != nil {
+		log.Fatal("p2p schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -245,6 +249,20 @@ func main() {
 	http.HandleFunc("/rocket/state", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.StateHandler(pool))))
 	http.HandleFunc("/rocket/bet", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.BetHandler(pool))))
 	http.HandleFunc("/rocket/cashout", auth_http.WithCORS(auth_http.RequireAuth(rocket_http.CashoutHandler(pool))))
+	http.HandleFunc("/p2p/listings", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.ListListingsHandler(pool))))
+	http.HandleFunc("/p2p/my-listings", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.MyListingsHandler(pool))))
+	http.HandleFunc("/p2p/listings/create", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.CreateListingHandler(pool))))
+	http.HandleFunc("/p2p/listings/close", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.CloseListingHandler(pool))))
+	http.HandleFunc("/p2p/market-price", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.MarketPriceHandler(pool))))
+	http.HandleFunc("/p2p/merchant/status", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.MerchantStatusHandler(pool))))
+	http.HandleFunc("/p2p/merchant/apply", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.BecomeMerchantHandler(pool))))
+	http.HandleFunc("/p2p/merchant/withdraw", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.WithdrawDepositHandler(pool))))
+	http.HandleFunc("/p2p/deals/create", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.CreateDealHandler(pool))))
+	http.HandleFunc("/p2p/deals/confirm", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.ConfirmDealHandler(pool))))
+	http.HandleFunc("/p2p/deals/cancel", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.CancelDealHandler(pool))))
+	http.HandleFunc("/p2p/deals/my", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.MyDealsHandler(pool))))
+	http.HandleFunc("/p2p/deals/detail", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.DealDetailHandler(pool))))
+	http.HandleFunc("/bankcards/withdraw", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.WithdrawHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -253,12 +271,15 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	p2p_sql.StartExpiryWorker(pool)
 	rocket_engine.Start(pool)
 	stockoracle.Start()
 	priceoracle.Start()
 	bankcards_sql.StartLavxWorker(pool)
 	positions_http.StartLiquidationWorker(pool)
 	savings_sql.StartInterestWorker(pool)
+	p2p_sql.SeedOfficialListings(ctx, pool)
 	log.Println("Auth server running on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }

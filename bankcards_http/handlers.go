@@ -316,3 +316,37 @@ func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		json.NewEncoder(w).Encode(items)
 	}
 }
+
+func WithdrawHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		authUser, ok := auth_http.UserFromContext(r)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req cardIDAmountRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Amount <= 0 {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
+		if err != nil {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		err = bankcards_sql.WithdrawFromCard(r.Context(), pool, userID, req.CardID, req.Amount)
+		if err != nil {
+			if err == bankcards_sql.ErrInsufficientFunds {
+				http.Error(w, "insufficient card balance", http.StatusPaymentRequired)
+				return
+			}
+			http.Error(w, "could not withdraw from card", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}

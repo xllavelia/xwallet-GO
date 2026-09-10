@@ -177,3 +177,30 @@ func ResolveByCardNumber(ctx context.Context, pool *pgxpool.Pool, number string)
 }
 
 var _ = time.Now
+
+func WithdrawFromCard(ctx context.Context, pool *pgxpool.Pool, userID int, cardID int, amount float64) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var owner int
+	if err := tx.QueryRow(ctx, `SELECT user_id FROM bank_cards WHERE id = $1;`, cardID).Scan(&owner); err != nil {
+		return ErrCardNotFound
+	}
+	if owner != userID {
+		return ErrCardNotFound
+	}
+
+	cardSource := FundingSource{Kind: "card", CardID: cardID}
+	if err := AdjustFundingBalance(ctx, tx, cardSource, -amount); err != nil {
+		return err
+	}
+	walletSource := FundingSource{Kind: "wallet", UserID: userID}
+	if err := AdjustFundingBalance(ctx, tx, walletSource, amount); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
