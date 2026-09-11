@@ -21,6 +21,7 @@ import (
 	"xwallet-server/home_http"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
+	"xwallet-server/positions_engine"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
 	"xwallet-server/priceoracle"
@@ -166,6 +167,9 @@ func main() {
 	if err := transfer_sql.AddReferenceCodeColumn(ctx, pool); err != nil {
 		log.Fatal("transfers reference_code migration: ", err)
 	}
+	if err := positions_sql.MigrateTimeTradeSchema(ctx, pool); err != nil {
+		log.Fatal("time trade schema migration: ", err)
+	}
 	if err := p2p_sql.MigrateP2PSchema(ctx, pool); err != nil {
 		log.Fatal("p2p schema migration: ", err)
 	}
@@ -263,6 +267,7 @@ func main() {
 	http.HandleFunc("/p2p/deals/my", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.MyDealsHandler(pool))))
 	http.HandleFunc("/p2p/deals/detail", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.DealDetailHandler(pool))))
 	http.HandleFunc("/bankcards/withdraw", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.WithdrawHandler(pool))))
+	http.HandleFunc("/positions/open-time", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenTimeTradeHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -271,7 +276,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
+	positions_engine.StartTimeTradeSettler(pool)
 	p2p_sql.StartExpiryWorker(pool)
 	rocket_engine.Start(pool)
 	stockoracle.Start()

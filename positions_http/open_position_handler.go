@@ -159,6 +159,7 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			Fees: fees, FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: liqPrice,
 			AutoClose: req.AutoClose, AutoCloseTarget: req.AutoCloseTarget,
 			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),
+			TradeMode: "standard",
 		}
 
 		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)

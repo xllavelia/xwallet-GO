@@ -33,7 +33,11 @@ type positionListItem struct {
 	OpenedAt          string   `json:"openedAt"`
 	ClosedAt          *string  `json:"closedAt"`
 	XpAwarded         int      `json:"xpAwarded"`
+	FundingKind       string   `json:"fundingKind"`
 	CashbackAwarded   float64  `json:"cashbackAwarded"`
+	TradeMode         string   `json:"tradeMode"`
+	ExpiresAt         *string  `json:"expiresAt"`
+	PayoutMultiplier  *float64 `json:"payoutMultiplier"`
 }
 
 func toListItem(p positions_sql.Position) positionListItem {
@@ -42,6 +46,11 @@ func toListItem(p positions_sql.Position) positionListItem {
 		s := p.ClosedAt.Format("2006-01-02T15:04:05Z")
 		closedAt = &s
 	}
+	var expiresAt *string
+	if p.ExpiresAt != nil {
+		s := p.ExpiresAt.Format("2006-01-02T15:04:05Z")
+		expiresAt = &s
+	}
 	return positionListItem{
 		ID: p.ID, TradeID: p.TradeID, Coin: p.Coin, Type: p.Type, EntryPrice: p.EntryPrice,
 		ClosePrice: p.ClosePrice, Leverage: p.Leverage, Amount: p.Amount, Margin: p.Margin,
@@ -49,7 +58,8 @@ func toListItem(p positions_sql.Position) positionListItem {
 		AutoClose: p.AutoClose, AutoCloseTarget: p.AutoCloseTarget, Pnl: p.Pnl,
 		PnlPercent: p.PnlPercent, Status: p.Status, Result: p.Result,
 		OpenedAt: p.OpenedAt.Format("2006-01-02T15:04:05Z"), ClosedAt: closedAt, XpAwarded: p.XpAwarded,
-		CashbackAwarded: p.CashbackAwarded,
+		FundingKind: p.FundingKind, CashbackAwarded: p.CashbackAwarded,
+		TradeMode: p.TradeMode, ExpiresAt: expiresAt, PayoutMultiplier: p.PayoutMultiplier,
 	}
 }
 

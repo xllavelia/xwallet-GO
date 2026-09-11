@@ -28,4 +28,7 @@ type Position struct {
 	FundingKind       string
 	FundingCardID     *int
 	CashbackAwarded   float64
+	TradeMode         string
+	ExpiresAt         *time.Time
+	PayoutMultiplier  *float64
 }

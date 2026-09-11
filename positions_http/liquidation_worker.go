@@ -2,36 +2,17 @@ package positions_http
 
 import (
 	"context"
-	"encoding/json"
 	"log"
-	"net/http"
 	"time"
 
+	"xwallet-server/bankcards_sql"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/priceoracle"
-	"xwallet-server/wallet_sql"
+	"xwallet-server/prime_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type binanceTicker struct {
-	Symbol string `json:"symbol"`
-	Price  string `json:"price"`
-}
-
-var liquidationHTTPClient = &http.Client{
-	Timeout: 8 * time.Second,
-}
-
-func fetchPrices(coins []string) (map[string]float64, error) {
-	return priceoracle.GetAll(coins), nil
-}
-
-func parsePrice(s string) float64 {
-	var f float64
-	json.Unmarshal([]byte(s), &f)
-	return f
-}
 
 func StartLiquidationWorker(pool *pgxpool.Pool) {
 	ticker := time.NewTicker(15 * time.Second)
@@ -40,7 +21,7 @@ func StartLiquidationWorker(pool *pgxpool.Pool) {
 			runLiquidationCheck(pool)
 		}
 	}()
-	log.Println("liquidation worker started (every 15s)")
+	log.Println("liquidation worker started (every 15s, card-aware)")
 }
 
 func runLiquidationCheck(pool *pgxpool.Pool) {
@@ -51,23 +32,12 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 		return
 	}
 
-	coinSet := map[string]bool{}
 	for _, p := range positions {
-		coinSet[p.Coin] = true
-	}
-	coins := make([]string, 0, len(coinSet))
-	for c := range coinSet {
-		coins = append(coins, c)
-	}
+		if p.TradeMode != "standard" {
+			continue // time trades settle через отдельный воркер
+		}
 
-	prices, err := fetchPrices(coins)
-	if err != nil {
-		log.Println("liquidation worker: could not fetch prices:", err)
-		return
-	}
-
-	for _, p := range positions {
-		currentPrice, hasPrice := prices[p.Coin]
+		currentPrice, hasPrice := priceoracle.Get(p.Coin)
 		if !hasPrice || currentPrice <= 0 {
 			continue
 		}
@@ -82,7 +52,6 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 
 		pnl := CalcPnl(p.Margin, p.Leverage, p.EntryPrice, currentPrice, p.Type)
 		pnlPercent := CalcPnlPercent(pnl, p.Margin)
-
 		shouldAutoClose := p.AutoClose && p.AutoCloseTarget != nil && pnlPercent >= *p.AutoCloseTarget
 
 		if !shouldLiquidate && !shouldAutoClose {
@@ -98,13 +67,49 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 			result = "loss"
 		}
 
-		if err := positions_sql.ClosePosition(ctx, pool, p.ID, closePrice, pnl, pnlPercent, result); err != nil {
-			log.Println("liquidation worker: could not close position", p.ID, err)
+		fundingSource := bankcards_sql.FundingSource{Kind: "wallet", UserID: p.UserID}
+		if p.FundingKind == "card" && p.FundingCardID != nil {
+			fundingSource = bankcards_sql.FundingSource{Kind: "card", CardID: *p.FundingCardID}
+		}
+
+		cashback := 0.0
+		if pnl > 0 && fundingSource.Kind == "card" {
+			if cardTier, tierErr := bankcards_sql.GetCardTier(ctx, pool, fundingSource.CardID); tierErr == nil {
+				if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
+					rate := cfg.CashbackPercent
+					if cardTier == "saint" {
+						if primeSub, _ := prime_sql.GetActiveSubscription(ctx, pool, p.UserID); primeSub != nil {
+							rate = cfg.CashbackPercentPrime
+						}
+					}
+					cashback = pnl * (rate / 100)
+				}
+			}
+		}
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
 			continue
 		}
-		if err := wallet_sql.AdjustBalance(ctx, pool, p.UserID, p.Margin+pnl); err != nil {
-			log.Println("liquidation worker: could not adjust balance for position", p.ID, err)
+
+		if err := positions_sql.ClosePositionTx(ctx, tx, p.ID, closePrice, pnl, pnlPercent, result, cashback); err != nil {
+			tx.Rollback(ctx)
+			log.Println("liquidation worker: close failed for", p.ID, err)
 			continue
+		}
+		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, p.Margin+pnl+cashback); err != nil {
+			tx.Rollback(ctx)
+			log.Println("liquidation worker: payout failed for", p.ID, err)
+			continue
+		}
+		if err := tx.Commit(ctx); err != nil {
+			log.Println("liquidation worker: commit failed for", p.ID, err)
+			continue
+		}
+
+		xp := battlepass_sql.AwardTradeXP(ctx, pool, p.UserID, pnl, fundingSource)
+		if xp > 0 {
+			positions_sql.SetXpAwarded(ctx, pool, p.ID, xp)
 		}
 
 		if shouldLiquidate {
