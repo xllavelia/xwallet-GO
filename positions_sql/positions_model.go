@@ -31,4 +31,5 @@ type Position struct {
 	TradeMode         string
 	ExpiresAt         *time.Time
 	PayoutMultiplier  *float64
+	ClientRequestID   string
 }

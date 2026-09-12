@@ -25,6 +25,7 @@ type openPositionRequest struct {
 	Amount          float64  `json:"amount"`
 	AutoClose       bool     `json:"autoClose"`
 	AutoCloseTarget *float64 `json:"autoCloseTarget"`
+	ClientRequestID string   `json:"clientRequestId"`
 }
 
 type positionResponse struct {
@@ -159,12 +160,16 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			Fees: fees, FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: liqPrice,
 			AutoClose: req.AutoClose, AutoCloseTarget: req.AutoCloseTarget,
 			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),
-			TradeMode: "standard",
+			TradeMode: "standard", ClientRequestID: req.ClientRequestID,
 		}
 
 		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)
 		if err != nil {
-			http.Error(w, "could not open position", http.StatusInternalServerError)
+			if err == positions_sql.ErrDuplicateRequest {
+				http.Error(w, "this trade was already placed", http.StatusConflict)
+				return
+			}
+			http.Error(w, "could not open time trade", http.StatusInternalServerError)
 			return
 		}
 

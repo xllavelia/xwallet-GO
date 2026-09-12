@@ -20,6 +20,7 @@ type openTimeTradeRequest struct {
 	EntryPrice      float64 `json:"entryPrice"`
 	Amount          float64 `json:"amount"`
 	DurationSeconds int     `json:"durationSeconds"`
+	ClientRequestID string  `json:"clientRequestId"`
 }
 
 type timeTradeResponse struct {
@@ -106,10 +107,15 @@ func OpenTimeTradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			AutoClose: false, AutoCloseTarget: nil,
 			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),
 			TradeMode: "time", ExpiresAt: &expiresAt, PayoutMultiplier: &multiplier,
+			ClientRequestID: req.ClientRequestID,
 		}
 
 		created, err := positions_sql.InsertPositionTx(r.Context(), tx, pos)
 		if err != nil {
+			if err == positions_sql.ErrDuplicateRequest {
+				http.Error(w, "this trade was already placed", http.StatusConflict)
+				return
+			}
 			http.Error(w, "could not open time trade", http.StatusInternalServerError)
 			return
 		}

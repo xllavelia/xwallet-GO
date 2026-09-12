@@ -170,6 +170,9 @@ func main() {
 	if err := positions_sql.MigrateTimeTradeSchema(ctx, pool); err != nil {
 		log.Fatal("time trade schema migration: ", err)
 	}
+	if err := positions_sql.MigrateIdempotencyKey(ctx, pool); err != nil {
+		log.Fatal("idempotency key migration: ", err)
+	}
 	if err := p2p_sql.MigrateP2PSchema(ctx, pool); err != nil {
 		log.Fatal("p2p schema migration: ", err)
 	}
