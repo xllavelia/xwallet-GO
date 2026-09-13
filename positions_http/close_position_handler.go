@@ -60,6 +60,10 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "position already closed", http.StatusConflict)
 			return
 		}
+		if pos.TradeMode == "time" {
+			http.Error(w, "time trades settle automatically and cannot be closed early", http.StatusBadRequest)
+			return
+		}
 
 		pnl := CalcPnl(pos.Margin, pos.Leverage, pos.EntryPrice, req.ClosePrice, pos.Type)
 		pnlPercent := CalcPnlPercent(pnl, pos.Margin)

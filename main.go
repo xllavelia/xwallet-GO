@@ -173,6 +173,9 @@ func main() {
 	if err := positions_sql.MigrateIdempotencyKey(ctx, pool); err != nil {
 		log.Fatal("idempotency key migration: ", err)
 	}
+	if err := wallet_sql.FixDefaultBalance(ctx, pool); err != nil {
+		log.Fatal("wallet default balance migration: ", err)
+	}
 	if err := p2p_sql.MigrateP2PSchema(ctx, pool); err != nil {
 		log.Fatal("p2p schema migration: ", err)
 	}
@@ -202,6 +205,7 @@ func main() {
 	http.HandleFunc("/positions/closed-list", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ListClosedPositionsHandler(pool))))
 	http.HandleFunc("/transfers/list", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.ListTransfersHandler(pool))))
 	http.HandleFunc("/users/search", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.SearchUsersHandler(pool))))
+	http.HandleFunc("/bankcards/search", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SearchHandler(pool))))
 	http.HandleFunc("/contacts/add", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.AddContactHandler(pool))))
 	http.HandleFunc("/contacts/list", auth_http.WithCORS(auth_http.RequireAuth(contacts_http.ListContactsHandler(pool))))
 	http.HandleFunc("/transfers/send", auth_http.WithCORS(auth_http.RequireAuth(transfer_http.SendTransferHandler(pool))))
@@ -247,7 +251,6 @@ func main() {
 	http.HandleFunc("/bankcards/close", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CloseHandler(pool))))
 	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))
 	http.HandleFunc("/home/summary", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetSummaryHandler(pool))))
-	http.HandleFunc("/bankcards/search", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SearchHandler(pool))))
 	http.HandleFunc("/stocks/catalog", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.CatalogHandler(pool))))
 	http.HandleFunc("/stocks/chart", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.ChartHandler(pool))))
 	http.HandleFunc("/stocks/portfolio", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.PortfolioHandler(pool))))
