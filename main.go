@@ -15,6 +15,9 @@ import (
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_http"
 	"xwallet-server/card_sql"
+	"xwallet-server/commodities_http"
+	"xwallet-server/commodities_sql"
+	"xwallet-server/commodityoracle"
 	"xwallet-server/contacts_http"
 	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
@@ -179,6 +182,9 @@ func main() {
 	if err := p2p_sql.MigrateP2PSchema(ctx, pool); err != nil {
 		log.Fatal("p2p schema migration: ", err)
 	}
+	if err := commodities_sql.MigrateCommoditiesSchema(ctx, pool); err != nil {
+		log.Fatal("commodities schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -274,6 +280,11 @@ func main() {
 	http.HandleFunc("/p2p/deals/detail", auth_http.WithCORS(auth_http.RequireAuth(p2p_http.DealDetailHandler(pool))))
 	http.HandleFunc("/bankcards/withdraw", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.WithdrawHandler(pool))))
 	http.HandleFunc("/positions/open-time", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenTimeTradeHandler(pool))))
+	http.HandleFunc("/commodities/catalog", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.CatalogHandler(pool))))
+	http.HandleFunc("/commodities/chart", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.ChartHandler(pool))))
+	http.HandleFunc("/commodities/portfolio", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.PortfolioHandler(pool))))
+	http.HandleFunc("/commodities/buy", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.BuyHandler(pool))))
+	http.HandleFunc("/commodities/sell", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.SellHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -282,6 +293,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	commodityoracle.Start()
 	positions_engine.StartTimeTradeSettler(pool)
 	p2p_sql.StartExpiryWorker(pool)
 	rocket_engine.Start(pool)
