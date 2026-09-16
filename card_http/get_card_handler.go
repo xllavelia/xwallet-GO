@@ -80,7 +80,7 @@ func GetCardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			values[coin] = v
 			cryptoUsd += v
 		}
-		totalUsd := cryptoUsd + usdtBalance
+		totalUsd := cryptoUsd
 
 		assets := make([]assetResponse, 0, 4)
 		for _, coin := range coinOrder {
