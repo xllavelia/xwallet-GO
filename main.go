@@ -24,6 +24,9 @@ import (
 	"xwallet-server/home_http"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
+	"xwallet-server/pixel_engine"
+	"xwallet-server/pixel_http"
+	"xwallet-server/pixel_sql"
 	"xwallet-server/positions_engine"
 	"xwallet-server/positions_http"
 	"xwallet-server/positions_sql"
@@ -185,6 +188,9 @@ func main() {
 	if err := commodities_sql.MigrateCommoditiesSchema(ctx, pool); err != nil {
 		log.Fatal("commodities schema migration: ", err)
 	}
+	if err := pixel_sql.MigratePixelSchema(ctx, pool); err != nil {
+		log.Fatal("pixel schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -285,6 +291,10 @@ func main() {
 	http.HandleFunc("/commodities/portfolio", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.PortfolioHandler(pool))))
 	http.HandleFunc("/commodities/buy", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.BuyHandler(pool))))
 	http.HandleFunc("/commodities/sell", auth_http.WithCORS(auth_http.RequireAuth(commodities_http.SellHandler(pool))))
+	http.HandleFunc("/pixel/state", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.StateHandler(pool))))
+	http.HandleFunc("/pixel/bet", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.BetHandler(pool))))
+	http.HandleFunc("/pixel/reveal", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.RevealHandler(pool))))
+	http.HandleFunc("/pixel/cashout", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.CashoutHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -293,7 +303,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-
+	pixel_engine.Start(pool)
 	commodityoracle.Start()
 	positions_engine.StartTimeTradeSettler(pool)
 	p2p_sql.StartExpiryWorker(pool)
