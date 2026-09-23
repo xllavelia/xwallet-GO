@@ -21,6 +21,9 @@ import (
 	"xwallet-server/contacts_http"
 	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
+	"xwallet-server/flip_engine"
+	"xwallet-server/flip_http"
+	"xwallet-server/flip_sql"
 	"xwallet-server/home_http"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
@@ -191,6 +194,9 @@ func main() {
 	if err := pixel_sql.MigratePixelSchema(ctx, pool); err != nil {
 		log.Fatal("pixel schema migration: ", err)
 	}
+	if err := flip_sql.MigrateFlipSchema(ctx, pool); err != nil {
+		log.Fatal("flip schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -295,6 +301,8 @@ func main() {
 	http.HandleFunc("/pixel/bet", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.BetHandler(pool))))
 	http.HandleFunc("/pixel/reveal", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.RevealHandler(pool))))
 	http.HandleFunc("/pixel/cashout", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.CashoutHandler(pool))))
+	http.HandleFunc("/flip/state", auth_http.WithCORS(auth_http.RequireAuth(flip_http.StateHandler(pool))))
+	http.HandleFunc("/flip/bet", auth_http.WithCORS(auth_http.RequireAuth(flip_http.BetHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
@@ -303,6 +311,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	flip_engine.Start(pool)
 	pixel_engine.Start(pool)
 	commodityoracle.Start()
 	positions_engine.StartTimeTradeSettler(pool)
