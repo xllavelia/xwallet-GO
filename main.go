@@ -48,6 +48,8 @@ import (
 	"xwallet-server/stockoracle"
 	"xwallet-server/stocks_http"
 	"xwallet-server/stocks_sql"
+	"xwallet-server/ticket_http"
+	"xwallet-server/ticket_sql"
 	"xwallet-server/transfer_http"
 	"xwallet-server/transfer_sql"
 	"xwallet-server/user_vouchers_http"
@@ -197,6 +199,9 @@ func main() {
 	if err := flip_sql.MigrateFlipSchema(ctx, pool); err != nil {
 		log.Fatal("flip schema migration: ", err)
 	}
+	if err := ticket_sql.MigrateTicketSchema(ctx, pool); err != nil {
+		log.Fatal("ticket schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -303,6 +308,9 @@ func main() {
 	http.HandleFunc("/pixel/cashout", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.CashoutHandler(pool))))
 	http.HandleFunc("/flip/state", auth_http.WithCORS(auth_http.RequireAuth(flip_http.StateHandler(pool))))
 	http.HandleFunc("/flip/bet", auth_http.WithCORS(auth_http.RequireAuth(flip_http.BetHandler(pool))))
+	http.HandleFunc("/ticket/state", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.StateHandler(pool))))
+	http.HandleFunc("/ticket/buy", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.BuyHandler(pool))))
+	http.HandleFunc("/ticket/open", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.OpenHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
