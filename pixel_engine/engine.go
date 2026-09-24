@@ -116,13 +116,13 @@ func RevealCell(ctx context.Context, userID int, cellIndex int) (pixel_sql.Revea
 	return pixel_sql.RevealCell(ctx, pool, userID, roundID, cellIndex)
 }
 
-func CashOut(ctx context.Context, userID int) (float64, error) {
+func CashOut(ctx context.Context, userID int) (float64, []int, error) {
 	mu.RLock()
 	isRunning := phase == "running"
 	roundID := currentRoundID
 	mu.RUnlock()
 	if !isRunning {
-		return 0, pixel_sql.ErrNotRunningPhase
+		return 0, nil, pixel_sql.ErrNotRunningPhase
 	}
 	return pixel_sql.CashOut(ctx, pool, userID, roundID)
 }

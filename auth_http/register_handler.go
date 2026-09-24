@@ -99,6 +99,8 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not create welcome voucher", http.StatusInternalServerError)
 			return
 		}
+		users_sql.UpdateUserDevice(r.Context(), pool, req.PlayerID, r.Header.Get("X-Device-ID"))
+
 		token, err := generateToken(user)
 		if err != nil {
 			http.Error(w, "could not create session", http.StatusInternalServerError)

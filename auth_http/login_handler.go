@@ -46,6 +46,8 @@ func LoginHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		users_sql.UpdateUserDevice(r.Context(), pool, user.PlayerID, r.Header.Get("X-Device-ID"))
+
 		token, err := generateToken(user)
 		if err != nil {
 			http.Error(w, "could not create session", http.StatusInternalServerError)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"xwallet-server/users_sql"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,6 +66,8 @@ type UserDetail struct {
 	ClosedPositions int
 	VoucherCount    int
 	Statuses        []string
+	Banned          bool
+	DeviceBanned    bool
 }
 
 func GetUserDetail(ctx context.Context, pool *pgxpool.Pool, playerID string) (UserDetail, error) {
@@ -105,5 +108,9 @@ func GetUserDetail(ctx context.Context, pool *pgxpool.Pool, playerID string) (Us
 		}
 	}
 
+	if st, err := users_sql.GetBanStatus(ctx, pool, playerID); err == nil {
+		d.Banned = st.AccountBanned
+		d.DeviceBanned = st.DeviceBanned
+	}
 	return d, nil
 }

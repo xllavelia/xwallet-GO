@@ -202,6 +202,9 @@ func main() {
 	if err := ticket_sql.MigrateTicketSchema(ctx, pool); err != nil {
 		log.Fatal("ticket schema migration: ", err)
 	}
+	if err := users_sql.MigrateBanSchema(ctx, pool); err != nil {
+		log.Fatalf("migrate ban schema: %v", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -311,6 +314,13 @@ func main() {
 	http.HandleFunc("/ticket/state", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.StateHandler(pool))))
 	http.HandleFunc("/ticket/buy", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.BuyHandler(pool))))
 	http.HandleFunc("/ticket/open", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.OpenHandler(pool))))
+	http.HandleFunc("/auth/status", auth_http.WithCORS(auth_http.RequireAuth(auth_http.AuthStatusHandler(pool))))
+	http.HandleFunc("/app/status", auth_http.WithCORS(auth_http.AppStatusHandler(pool)))
+	http.HandleFunc("/admin/users/ban", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.BanUserHandler(pool)))))
+	http.HandleFunc("/admin/users/unban", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.UnbanUserHandler(pool)))))
+	http.HandleFunc("/admin/maintenance", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GetMaintenanceHandler(pool)))))
+	http.HandleFunc("/admin/maintenance/set", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetMaintenanceHandler(pool)))))
+	http.HandleFunc("/admin/maintenance/clear", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.ClearMaintenanceHandler(pool)))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

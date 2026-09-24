@@ -28,7 +28,12 @@ func unmarshalInts(b []byte) []int {
 	}
 	return out
 }
-
+func pickRandom(items []int, n int) []int {
+	cp := make([]int, len(items))
+	copy(cp, items)
+	rand.Shuffle(len(cp), func(i, j int) { cp[i], cp[j] = cp[j], cp[i] })
+	return cp[:n]
+}
 func generateMinePositions(totalCells int, mineCount int) []int {
 	all := make([]int, totalCells)
 	for i := range all {
@@ -93,34 +98,31 @@ func finalizeStatsTx(ctx context.Context, tx pgx.Tx, userID int, won bool, payou
 	`, wonInt, payout-stake, userID)
 	return err
 }
-
 func PlaceBet(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int, amount float64) (int, error) {
 	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
 	if err != nil {
 		return 0, err
 	}
-
 	cols, rows := GridCols, GridRows
 	mines := generateMinePositions(cols*rows, MineCount())
-
+	preRevealed := pickRandom(mines, 2)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
-
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, -amount); err != nil {
 		if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
 			return 0, ErrInsufficientFunds
 		}
 		return 0, err
 	}
-
 	var boardID int
 	err = tx.QueryRow(ctx, `
-		INSERT INTO pixel_boards (round_id, user_id, amount, grid_cols, grid_rows, mine_positions, revealed_cells, lives_remaining, status)
-		VALUES ($1,$2,$3,$4,$5,$6,'[]',$7,'active') RETURNING id;
-	`, roundID, userID, amount, cols, rows, marshalInts(mines), LivesCount).Scan(&boardID)
+	INSERT INTO pixel_boards (round_id, user_id, amount, grid_cols, grid_rows,
+	mine_positions, revealed_cells, lives_remaining, status)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,2,'active') RETURNING id;
+	`, roundID, userID, amount, cols, rows, marshalInts(mines), marshalInts(preRevealed)).Scan(&boardID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -128,7 +130,6 @@ func PlaceBet(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int, 
 		}
 		return 0, err
 	}
-
 	return boardID, tx.Commit(ctx)
 }
 
@@ -224,27 +225,27 @@ func RevealCell(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int
 	return result, nil
 }
 
-func CashOut(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int) (float64, error) {
+func CashOut(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int) (float64, []int, error) {
 	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer tx.Rollback(ctx)
 
 	board, err := getBoardForUpdate(ctx, tx, roundID, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, ErrNoActiveBoard
+			return 0, nil, ErrNoActiveBoard
 		}
-		return 0, err
+		return 0, nil, err
 	}
 	if board.Status != "active" {
-		return 0, ErrNoActiveBoard
+		return 0, nil, ErrNoActiveBoard
 	}
 
 	safeCount := countSafe(board.RevealedCells, board.MinePositions)
@@ -252,15 +253,15 @@ func CashOut(ctx context.Context, pool *pgxpool.Pool, userID int, roundID int) (
 	payout := board.Amount * multiplier
 
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, payout); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE pixel_boards SET status='cashed_out', payout=$1, ended_at=now() WHERE id=$2;`, payout, board.ID); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if err := finalizeStatsTx(ctx, tx, userID, true, payout, board.Amount); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return payout, tx.Commit(ctx)
+	return payout, nil, tx.Commit(ctx)
 }
 
 type BoardStateDTO struct {
@@ -299,7 +300,7 @@ func GetBoardState(ctx context.Context, pool *pgxpool.Pool, userID int, roundID 
 		Exists: true, Status: b.Status, LivesRemaining: b.LivesRemaining,
 		RevealedCells: b.RevealedCells, SafeCellsCount: safeCount,
 		CurrentMultiplier: multiplier, CurrentPayout: b.Amount * multiplier,
-		Amount: b.Amount, Payout: b.Payout, MinePositions: []int{},
+		Amount: b.Amount, Payout: b.Payout, MinePositions: b.MinePositions,
 	}
 	if b.Status != "active" {
 		dto.MinePositions = b.MinePositions

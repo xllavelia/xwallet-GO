@@ -71,6 +71,8 @@ type userDetailResponse struct {
 	ClosedPositions int      `json:"closedPositions"`
 	VoucherCount    int      `json:"voucherCount"`
 	Statuses        []string `json:"statuses"`
+	Banned          bool     `json:"banned"`
+	DeviceBanned    bool     `json:"deviceBanned"`
 }
 
 func GetUserDetailHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -101,6 +103,7 @@ func GetUserDetailHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			BattlepassTrack: d.BattlepassTrack, BattlepassXp: d.BattlepassXp,
 			OpenPositions: d.OpenPositions, ClosedPositions: d.ClosedPositions,
 			VoucherCount: d.VoucherCount, Statuses: statuses,
+			Banned: d.Banned, DeviceBanned: d.DeviceBanned,
 		})
 	}
 }
