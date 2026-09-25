@@ -40,6 +40,8 @@ import (
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_http"
 	"xwallet-server/referral_sql"
+	"xwallet-server/rewards_http"
+	"xwallet-server/rewards_sql"
 	"xwallet-server/rocket_engine"
 	"xwallet-server/rocket_http"
 	"xwallet-server/rocket_sql"
@@ -205,6 +207,9 @@ func main() {
 	if err := users_sql.MigrateBanSchema(ctx, pool); err != nil {
 		log.Fatalf("migrate ban schema: %v", err)
 	}
+	if err := rewards_sql.MigrateRewardsSchema(ctx, pool); err != nil {
+		log.Fatal("rewards schema migration: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -309,6 +314,8 @@ func main() {
 	http.HandleFunc("/pixel/bet", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.BetHandler(pool))))
 	http.HandleFunc("/pixel/reveal", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.RevealHandler(pool))))
 	http.HandleFunc("/pixel/cashout", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.CashoutHandler(pool))))
+	http.HandleFunc("/rewards/state", auth_http.WithCORS(auth_http.RequireAuth(rewards_http.StateHandler(pool))))
+	http.HandleFunc("/rewards/claim", auth_http.WithCORS(auth_http.RequireAuth(rewards_http.ClaimHandler(pool))))
 	http.HandleFunc("/flip/state", auth_http.WithCORS(auth_http.RequireAuth(flip_http.StateHandler(pool))))
 	http.HandleFunc("/flip/bet", auth_http.WithCORS(auth_http.RequireAuth(flip_http.BetHandler(pool))))
 	http.HandleFunc("/ticket/state", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.StateHandler(pool))))
