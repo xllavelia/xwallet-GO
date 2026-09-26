@@ -25,6 +25,8 @@ import (
 	"xwallet-server/flip_http"
 	"xwallet-server/flip_sql"
 	"xwallet-server/home_http"
+	"xwallet-server/mining_http"
+	"xwallet-server/mining_sql"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
 	"xwallet-server/pixel_engine"
@@ -207,6 +209,9 @@ func main() {
 	if err := users_sql.MigrateBanSchema(ctx, pool); err != nil {
 		log.Fatalf("migrate ban schema: %v", err)
 	}
+	if err := mining_sql.MigrateMiningSchema(ctx, pool); err != nil {
+		log.Fatal("mining schema migration: ", err)
+	}
 	if err := rewards_sql.MigrateRewardsSchema(ctx, pool); err != nil {
 		log.Fatal("rewards schema migration: ", err)
 	}
@@ -328,6 +333,12 @@ func main() {
 	http.HandleFunc("/admin/maintenance", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GetMaintenanceHandler(pool)))))
 	http.HandleFunc("/admin/maintenance/set", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.SetMaintenanceHandler(pool)))))
 	http.HandleFunc("/admin/maintenance/clear", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.ClearMaintenanceHandler(pool)))))
+	http.HandleFunc("/mining/state", auth_http.WithCORS(auth_http.RequireAuth(mining_http.StateHandler(pool))))
+	http.HandleFunc("/mining/servers/buy", auth_http.WithCORS(auth_http.RequireAuth(mining_http.BuyServerHandler(pool))))
+	http.HandleFunc("/mining/servers/wake", auth_http.WithCORS(auth_http.RequireAuth(mining_http.WakeServerHandler(pool))))
+	http.HandleFunc("/mining/servers/delete", auth_http.WithCORS(auth_http.RequireAuth(mining_http.DeleteServerHandler(pool))))
+	http.HandleFunc("/mining/servers/upgrade", auth_http.WithCORS(auth_http.RequireAuth(mining_http.UpgradeServerHandler(pool))))
+	http.HandleFunc("/mining/items/buy", auth_http.WithCORS(auth_http.RequireAuth(mining_http.BuyItemHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
