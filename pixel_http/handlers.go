@@ -152,6 +152,7 @@ func RevealHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		})
 	}
 }
+
 func CashoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -163,7 +164,7 @@ func CashoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		payout, minePositions, err := pixel_engine.CashOut(r.Context(), userID)
+		payout, err := pixel_engine.CashOut(r.Context(), userID)
 		if err != nil {
 			switch err {
 			case pixel_sql.ErrNotRunningPhase:
@@ -176,9 +177,6 @@ func CashoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"payout":        payout,
-			"minePositions": minePositions,
-		})
+		json.NewEncoder(w).Encode(map[string]float64{"payout": payout})
 	}
 }
