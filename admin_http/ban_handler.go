@@ -15,6 +15,7 @@ import (
 type banRequest struct {
 	PlayerID string `json:"playerId"`
 	Device   bool   `json:"device"`
+	Reason   string `json:"reason"`
 }
 
 func BanUserHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -32,7 +33,7 @@ func BanUserHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if req.Device {
 			err = users_sql.BanDevice(r.Context(), pool, req.PlayerID)
 		} else {
-			err = users_sql.BanAccount(r.Context(), pool, req.PlayerID)
+			err = users_sql.BanAccount(r.Context(), pool, req.PlayerID, req.Reason)
 		}
 		if err != nil {
 			switch {

@@ -104,15 +104,15 @@ type RankTier struct {
 
 var RankTiers = [10]RankTier{
 	{Level: 1, UpgradeCostMult: 0.0, PowerMult: 1.00, ProfitMult: 1.00, EnergyMult: 1.00}, // старт, бесплатно
-	{Level: 2, UpgradeCostMult: 0.4, PowerMult: 1.08, ProfitMult: 1.12, EnergyMult: 1.03},
-	{Level: 3, UpgradeCostMult: 0.8, PowerMult: 1.16, ProfitMult: 1.25, EnergyMult: 1.06},
-	{Level: 4, UpgradeCostMult: 1.4, PowerMult: 1.25, ProfitMult: 1.40, EnergyMult: 1.10},
-	{Level: 5, UpgradeCostMult: 2.2, PowerMult: 1.35, ProfitMult: 1.55, EnergyMult: 1.14},
-	{Level: 6, UpgradeCostMult: 3.2, PowerMult: 1.45, ProfitMult: 1.72, EnergyMult: 1.18},
-	{Level: 7, UpgradeCostMult: 4.5, PowerMult: 1.55, ProfitMult: 1.90, EnergyMult: 1.22},
-	{Level: 8, UpgradeCostMult: 6.0, PowerMult: 1.70, ProfitMult: 2.10, EnergyMult: 1.26},
+	{Level: 2, UpgradeCostMult: 0.2, PowerMult: 1.08, ProfitMult: 1.12, EnergyMult: 1.03},
+	{Level: 3, UpgradeCostMult: 0.4, PowerMult: 1.16, ProfitMult: 1.25, EnergyMult: 1.06},
+	{Level: 4, UpgradeCostMult: 1.0, PowerMult: 1.25, ProfitMult: 1.40, EnergyMult: 1.10},
+	{Level: 5, UpgradeCostMult: 1.8, PowerMult: 1.35, ProfitMult: 1.55, EnergyMult: 1.14},
+	{Level: 6, UpgradeCostMult: 2.6, PowerMult: 1.45, ProfitMult: 1.72, EnergyMult: 1.18},
+	{Level: 7, UpgradeCostMult: 3.9, PowerMult: 1.55, ProfitMult: 1.90, EnergyMult: 1.22},
+	{Level: 8, UpgradeCostMult: 5.0, PowerMult: 1.70, ProfitMult: 2.10, EnergyMult: 1.26},
 	{Level: 9, UpgradeCostMult: 8.0, PowerMult: 1.85, ProfitMult: 2.35, EnergyMult: 1.30},
-	{Level: 10, UpgradeCostMult: 10.5, PowerMult: 2.00, ProfitMult: 2.60, EnergyMult: 1.35}, // макс. ранг
+	{Level: 10, UpgradeCostMult: 10.0, PowerMult: 2.20, ProfitMult: 2.80, EnergyMult: 1.40}, // макс. ранг
 }
 
 // ===================== КАТАЛОГ СЕРВЕРОВ =====================

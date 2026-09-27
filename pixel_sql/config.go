@@ -12,8 +12,8 @@ var MineFractionDenominator = 3
 
 var LivesCount = 2
 
-var BettingDuration = 15 // секунд на перерыв/ставки
-var RoundDuration = 30   // секунд максимум на партию
+var BettingDuration = 10 // секунд на перерыв/ставки
+var RoundDuration = 20   // секунд максимум на партию
 var RevealDuration = 3   // секунд на просмотр поля после поражения
 
 func TotalCells() int { return GridCols * GridRows }

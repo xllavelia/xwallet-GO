@@ -15,8 +15,12 @@ type BanStatus struct {
 	DeviceBanned  bool
 }
 
-func BanAccount(ctx context.Context, pool *pgxpool.Pool, playerID string) error {
-	tag, err := pool.Exec(ctx, `UPDATE users SET banned = TRUE WHERE player_id = $1;`, playerID)
+func BanAccount(ctx context.Context, pool *pgxpool.Pool, playerID string, reason string) error {
+	if reason == "" {
+		reason = "unknown"
+	}
+	tag, err := pool.Exec(ctx, `UPDATE users SET banned = TRUE, ban_reason = $2 WHERE player_id = $1;`,
+		playerID, reason)
 	if err != nil {
 		return err
 	}

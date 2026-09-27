@@ -53,10 +53,15 @@ func AppStatusHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if until != nil {
 			untilStr = until.UTC().Format(time.RFC3339)
 		}
+		isAdmin := false
+		if user, ok := UserFromContext(r); ok {
+			isAdmin = user.IsAdmin
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(appStatusResponse{
-			Maintenance: active,
-			Until:       untilStr,
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"maintenance": active,
+			"until":       untilStr,
+			"isAdmin":     isAdmin,
 		})
 	}
 }
