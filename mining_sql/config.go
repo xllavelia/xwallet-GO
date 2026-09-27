@@ -19,9 +19,9 @@ const (
 	DefaultMaxEnergy = 200.0
 
 	// Сколько добавляет "расширитель максимальной энергии" за одну покупку. Складывается.
-	MaxEnergyExpanderAddAmount = 50.0
+	MaxEnergyExpanderAddAmount = 100.0
 	// Цена расширителя максимальной энергии.
-	MaxEnergyExpanderPrice = 150.0
+	MaxEnergyExpanderPrice = 200.0
 
 	// Если игрок не заходил очень долго — тик считает прогресс не больше этого времени,
 	// чтобы не улетать в отрицательную энергию/безумные цифры при возвращении через неделю.
@@ -144,108 +144,109 @@ var ServerCatalog = []ServerDef{
 	// ---------- EPIC (6) ----------
 	{
 		ID: "epic_ru", Name: "Сибирский Узел", Country: "Russia", Rarity: RarityEpic,
-		Price: 30, Power: 10, ProfitPerHour: 2, EnergyPerHour: 3,
+		Price: 30, Power: 10, ProfitPerHour: 0.7, EnergyPerHour: 3.6,
 		SleepMinutes: 20, LifetimeProfitCap: 90,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"stable"},
 	},
 	{
 		ID: "epic_fr", Name: "Le Serveur Rouge", Country: "France", Rarity: RarityEpic,
-		Price: 70, Power: 20, ProfitPerHour: 6, EnergyPerHour: 5,
+		Price: 70, Power: 20, ProfitPerHour: 2.0, EnergyPerHour: 6.0,
 		SleepMinutes: 25, LifetimeProfitCap: 200,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"overclocked"},
 	},
 	{
 		ID: "epic_it", Name: "Nodo Vesuvio", Country: "Italy", Rarity: RarityEpic,
-		Price: 75, Power: 20, ProfitPerHour: 4, EnergyPerHour: 2,
+		Price: 75, Power: 20, ProfitPerHour: 1.4, EnergyPerHour: 2.4,
 		SleepMinutes: 30, LifetimeProfitCap: 210,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"coldroom"},
 	},
 	{
 		ID: "epic_de", Name: "Falkenrechner", Country: "Germany", Rarity: RarityEpic,
-		Price: 80, Power: 30, ProfitPerHour: 7, EnergyPerHour: 6,
+		Price: 80, Power: 30, ProfitPerHour: 2.4, EnergyPerHour: 7.2,
 		SleepMinutes: 20, LifetimeProfitCap: 220,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"efficient"},
 	},
 	{
 		ID: "epic_jp", Name: "Ganges Monolith", Country: "India", Rarity: RarityEpic,
-		Price: 85, Power: 25, ProfitPerHour: 6, EnergyPerHour: 3,
+		Price: 85, Power: 25, ProfitPerHour: 2.0, EnergyPerHour: 3.6,
 		SleepMinutes: 25, LifetimeProfitCap: 230,
 		PermanentNoSleepAtMaxRank: true,
 		Perks:                     []string{"silent"},
 	},
 	{
 		ID: "epic_us", Name: "Liberty Rig", Country: "USA", Rarity: RarityEpic,
-		Price: 100, Power: 40, ProfitPerHour: 10, EnergyPerHour: 9,
+		Price: 100, Power: 40, ProfitPerHour: 3.4, EnergyPerHour: 10.8,
 		SleepMinutes: 10, LifetimeProfitCap: 260,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"turbo"},
 	},
+
 	// ---------- MYTHIC (6) ----------
 	{
 		ID: "mythic_gb", Name: "Crown Cluster", Country: "UK", Rarity: RarityMythic,
-		Price: 150, Power: 70, ProfitPerHour: 15, EnergyPerHour: 11,
+		Price: 150, Power: 70, ProfitPerHour: 5.0, EnergyPerHour: 13.2,
 		SleepMinutes: 25, LifetimeProfitCap: 420,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"efficient", "stable"},
 	},
 	{
 		ID: "mythic_nl", Name: "Tulip Datacenter", Country: "Netherlands", Rarity: RarityMythic,
-		Price: 160, Power: 80, ProfitPerHour: 17, EnergyPerHour: 13,
+		Price: 160, Power: 80, ProfitPerHour: 5.7, EnergyPerHour: 15.6,
 		SleepMinutes: 25, LifetimeProfitCap: 440,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"silent", "turbo"},
 	},
 	{
 		ID: "mythic_br", Name: "Amazônia Rig", Country: "Brazil", Rarity: RarityMythic,
-		Price: 180, Power: 90, ProfitPerHour: 20, EnergyPerHour: 18,
+		Price: 180, Power: 90, ProfitPerHour: 6.7, EnergyPerHour: 21.6,
 		SleepMinutes: 15, LifetimeProfitCap: 480,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"stable", "efficient"},
 	},
 	{
 		ID: "mythic_ca", Name: "Maple Farm", Country: "Canada", Rarity: RarityMythic,
-		Price: 190, Power: 40, ProfitPerHour: 9, EnergyPerHour: 3,
+		Price: 190, Power: 40, ProfitPerHour: 3.0, EnergyPerHour: 3.6,
 		SleepMinutes: 40, LifetimeProfitCap: 500,
 		PermanentNoSleepAtMaxRank: true,
 		Perks:                     []string{"coldroom", "silent"},
 	},
 	{
 		ID: "mythic_kr", Name: "Hangang Node", Country: "South Korea", Rarity: RarityMythic,
-		Price: 210, Power: 100, ProfitPerHour: 24, EnergyPerHour: 20,
+		Price: 210, Power: 100, ProfitPerHour: 8.0, EnergyPerHour: 24.0,
 		SleepMinutes: 20, LifetimeProfitCap: 540,
 		PermanentNoSleepAtMaxRank: true,
 		Perks:                     []string{"overclocked", "turbo"},
 	},
 	{
 		ID: "mythic_cn", Name: "Great Wall Cluster", Country: "China", Rarity: RarityMythic,
-		Price: 220, Power: 110, ProfitPerHour: 28, EnergyPerHour: 22,
+		Price: 220, Power: 110, ProfitPerHour: 9.4, EnergyPerHour: 26.4,
 		SleepMinutes: 20, LifetimeProfitCap: 560,
 		PermanentNoSleepAtMaxRank: true,
 		Perks:                     []string{"overclocked", "stable"},
 	},
 
-	// ---------- LEGENDARY (3) — никогда не спят (SleepMinutes: 0) ----------
+	// ---------- LEGENDARY (3) — никогда не спят ----------
 	{
 		ID: "legend_in", Name: "Sakura Node", Country: "Japan", Rarity: RarityLegendary,
-		Price: 500, Power: 200, ProfitPerHour: 50, EnergyPerHour: 37,
+		Price: 500, Power: 200, ProfitPerHour: 16.7, EnergyPerHour: 44.4,
 		SleepMinutes: 0, LifetimeProfitCap: 1200,
-		PermanentNoSleepAtMaxRank: false, // уже Always On с самого начала
+		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"efficient", "overclocked"},
 	},
 	{
 		ID: "legend_is", Name: "Aurora Vault", Country: "Iceland", Rarity: RarityLegendary,
-		Price: 900, Power: 350, ProfitPerHour: 70, EnergyPerHour: 50,
+		Price: 900, Power: 350, ProfitPerHour: 23.4, EnergyPerHour: 60.0,
 		SleepMinutes: 0, LifetimeProfitCap: 2000,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"stable", "silent"},
 	},
 	{
 		ID: "legend_ch", Name: "Matterhorn Core", Country: "Switzerland", Rarity: RarityLegendary,
-		Price: 1500, Power: 500, ProfitPerHour: 100, EnergyPerHour: 80,
+		Price: 1500, Power: 500, ProfitPerHour: 33.4, EnergyPerHour: 96.0,
 		SleepMinutes: 0, LifetimeProfitCap: 4000,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"overclocked", "turbo"},
@@ -287,24 +288,24 @@ type BuffDuration struct {
 // Каталог баффов с их длительностями и ценами. Меняй Price свободно.
 var BuffCatalog = map[string][]BuffDuration{
 	BuffNoSleep: {
-		{Key: "24h", Hours: 24, Price: 200},
-		{Key: "3d", Hours: 72, Price: 400},
-		{Key: "7d", Hours: 168, Price: 600},
+		{Key: "24h", Hours: 24, Price: 700},
+		{Key: "3d", Hours: 72, Price: 1400},
+		{Key: "7d", Hours: 168, Price: 2800},
 	},
 	BuffProfitBoost: {
-		{Key: "24h", Hours: 24, Price: 150},
-		{Key: "3d", Hours: 72, Price: 250},
-		{Key: "7d", Hours: 168, Price: 450},
+		{Key: "24h", Hours: 24, Price: 350},
+		{Key: "3d", Hours: 72, Price: 800},
+		{Key: "7d", Hours: 168, Price: 1600},
 	},
 	BuffPowerBoost: { // дешевле профит-бустера, но жрёт x2 энергии
-		{Key: "24h", Hours: 24, Price: 75},
-		{Key: "3d", Hours: 72, Price: 150},
-		{Key: "7d", Hours: 168, Price: 230},
+		{Key: "24h", Hours: 24, Price: 200},
+		{Key: "3d", Hours: 72, Price: 400},
+		{Key: "7d", Hours: 168, Price: 800},
 	},
 	BuffPowerBoostEf: { // самый дорогой — x2 мощности и экономия энергии
-		{Key: "24h", Hours: 24, Price: 200},
-		{Key: "3d", Hours: 72, Price: 320},
-		{Key: "7d", Hours: 168, Price: 620},
+		{Key: "24h", Hours: 24, Price: 500},
+		{Key: "3d", Hours: 72, Price: 1000},
+		{Key: "7d", Hours: 168, Price: 2000},
 	},
 }
 
@@ -317,9 +318,9 @@ type EnergyPackDef struct {
 
 // Три пакета энергии, как ты просил.
 var EnergyPacks = []EnergyPackDef{
-	{ID: "small", Amount: 100, Price: 25},
-	{ID: "medium", Amount: 300, Price: 70},
-	{ID: "large", Amount: 800, Price: 150},
+	{ID: "small", Amount: 100, Price: 40},
+	{ID: "medium", Amount: 300, Price: 90},
+	{ID: "large", Amount: 800, Price: 200},
 }
 
 func GetEnergyPack(id string) (EnergyPackDef, bool) {

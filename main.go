@@ -51,6 +51,8 @@ import (
 	"xwallet-server/rocket_sql"
 	"xwallet-server/savings_http"
 	"xwallet-server/savings_sql"
+	"xwallet-server/slots_http"
+	"xwallet-server/slots_sql"
 	"xwallet-server/stockoracle"
 	"xwallet-server/stocks_http"
 	"xwallet-server/stocks_sql"
@@ -223,6 +225,9 @@ func main() {
 	if err := empire_sql.SeedEmpireAssets(ctx, pool); err != nil {
 		log.Fatal("empire seed: ", err)
 	}
+	if err := slots_sql.MigrateSlotsSchema(ctx, pool); err != nil {
+		log.Fatal("slots migrate: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -349,6 +354,9 @@ func main() {
 	http.HandleFunc("/mining/items/buy", auth_http.WithCORS(auth_http.RequireAuth(mining_http.BuyItemHandler(pool))))
 	http.HandleFunc("/empire/state", auth_http.WithCORS(auth_http.RequireAuth(empire_http.StateHandler(pool))))
 	http.HandleFunc("/empire/action", auth_http.WithCORS(auth_http.RequireAuth(empire_http.ActionHandler(pool))))
+	http.HandleFunc("/slots/state", auth_http.WithCORS(auth_http.RequireAuth(slots_http.StateHandler(pool))))
+	http.HandleFunc("/slots/action", auth_http.WithCORS(auth_http.RequireAuth(slots_http.ActionHandler(pool))))
+
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
