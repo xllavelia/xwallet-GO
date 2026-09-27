@@ -245,8 +245,8 @@ var ServerCatalog = []ServerDef{
 	},
 	{
 		ID: "legend_ch", Name: "Matterhorn Core", Country: "Switzerland", Rarity: RarityLegendary,
-		Price: 1500, Power: 500, ProfitPerHour: 4000, EnergyPerHour: 80,
-		SleepMinutes: 0, LifetimeProfitCap: 500,
+		Price: 1500, Power: 500, ProfitPerHour: 100, EnergyPerHour: 80,
+		SleepMinutes: 0, LifetimeProfitCap: 4000,
 		PermanentNoSleepAtMaxRank: false,
 		Perks:                     []string{"overclocked", "turbo"},
 	},

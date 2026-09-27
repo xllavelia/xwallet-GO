@@ -21,6 +21,8 @@ import (
 	"xwallet-server/contacts_http"
 	"xwallet-server/contacts_sql"
 	"xwallet-server/db_connection"
+	"xwallet-server/empire_http"
+	"xwallet-server/empire_sql"
 	"xwallet-server/flip_engine"
 	"xwallet-server/flip_http"
 	"xwallet-server/flip_sql"
@@ -215,6 +217,12 @@ func main() {
 	if err := rewards_sql.MigrateRewardsSchema(ctx, pool); err != nil {
 		log.Fatal("rewards schema migration: ", err)
 	}
+	if err := empire_sql.CreateEmpireTables(ctx, pool); err != nil {
+		log.Fatal("empire tables: ", err)
+	}
+	if err := empire_sql.SeedEmpireAssets(ctx, pool); err != nil {
+		log.Fatal("empire seed: ", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -339,6 +347,8 @@ func main() {
 	http.HandleFunc("/mining/servers/delete", auth_http.WithCORS(auth_http.RequireAuth(mining_http.DeleteServerHandler(pool))))
 	http.HandleFunc("/mining/servers/upgrade", auth_http.WithCORS(auth_http.RequireAuth(mining_http.UpgradeServerHandler(pool))))
 	http.HandleFunc("/mining/items/buy", auth_http.WithCORS(auth_http.RequireAuth(mining_http.BuyItemHandler(pool))))
+	http.HandleFunc("/empire/state", auth_http.WithCORS(auth_http.RequireAuth(empire_http.StateHandler(pool))))
+	http.HandleFunc("/empire/action", auth_http.WithCORS(auth_http.RequireAuth(empire_http.ActionHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
