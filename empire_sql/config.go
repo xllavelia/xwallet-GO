@@ -50,17 +50,17 @@ const WorkerSatisfactionDrift = 0.1
 
 // ---------- Уровень империи ----------
 // Бонус дохода за каждый уровень империи (кроме 1-го).
-const LevelIncomeBonusPerLevel = 0.01
+const LevelIncomeBonusPerLevel = 0.02
 
 // XP за чистый доход: 1 XP за каждые $50 начисленного дохода.
-const XpPerIncome = 1.0 / 50
+const XpPerIncome = 1.0 / 10
 
 // XP за траты: 1 XP за каждые $25, потраченные на покупку,
 // апгрейд, найм или исследование.
-const XpPerSpent = 1.0 / 25
+const XpPerSpent = 1.0 / 10
 
 // XP за потраченные на исследование деньги (мягче обычных трат).
-const XpPerResearchSpent = 1.0 / 50
+const XpPerResearchSpent = 1.0 / 7
 
 // EmpireXpForLevel — сколько XP нужно для перехода
 // level -> level+1. Рост кривой: 100 * level^1.5.
@@ -207,74 +207,74 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "atm_network", Name: "ATM Network", Sector: "financial", Rarity: "common",
 		Description: "A small network of cash machines earning fees.",
-		BaseCost:    120, BaseIncome: 5, BaseExpenses: 5, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    120, BaseIncome: 5, BaseExpenses: 1, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 60, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "exchange_office", Name: "Exchange Office", Sector: "financial", Rarity: "uncommon",
 		Description: "Currency exchange booth with a steady spread.",
-		BaseCost:    240, BaseIncome: 10, BaseExpenses: 10, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    240, BaseIncome: 10, BaseExpenses: 2, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 120, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "bank_branch", Name: "Bank Branch", Sector: "financial", Rarity: "uncommon",
 		Description: "Classic branch with deposits, loans and fees.",
-		BaseCost:    500, BaseIncome: 24, BaseExpenses: 20, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 3,
+		BaseCost:    500, BaseIncome: 24, BaseExpenses: 4, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 3,
 		UpgradeCostBase: 150, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "investment_fund", Name: "Investment Fund", Sector: "financial", Rarity: "rare",
 		Description: "Managed fund earning management fees.",
-		BaseCost:    750, BaseIncome: 28, BaseExpenses: 52, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 5,
+		BaseCost:    750, BaseIncome: 28, BaseExpenses: 7, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 5,
 		UpgradeCostBase: 200, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "digital_bank", Name: "Digital Bank", Sector: "financial", Rarity: "epic",
 		Description: "Mobile-first bank with millions of users.",
-		BaseCost:    1000, BaseIncome: 34, BaseExpenses: 118, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 8,
+		BaseCost:    1000, BaseIncome: 34, BaseExpenses: 14, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 8,
 		UpgradeCostBase: 320, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "private_bank", Name: "Private Bank", Sector: "financial", Rarity: "legendary",
 		Description: "Private banking for high net worth clients.",
-		BaseCost:    1400, BaseIncome: 42, BaseExpenses: 260, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 12,
+		BaseCost:    1400, BaseIncome: 42, BaseExpenses: 28, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 12,
 		UpgradeCostBase: 450, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
 	{
 		ID: "workshop", Name: "Workshop", Sector: "industrial", Rarity: "common",
 		Description: "Small workshop producing goods by hand.",
-		BaseCost:    40, BaseIncome: 2, BaseExpenses: 5, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    40, BaseIncome: 2, BaseExpenses: 1, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 12, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "craft_studio", Name: "Craft Studio", Sector: "industrial", Rarity: "common",
 		Description: "Artisan studio with premium handmade goods.",
-		BaseCost:    80, BaseIncome: 5, BaseExpenses: 10, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    80, BaseIncome: 5, BaseExpenses: 2, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 24, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "factory", Name: "Factory", Sector: "industrial", Rarity: "uncommon",
 		Description: "Assembly line manufacturing at scale.",
-		BaseCost:    160, BaseIncome: 12, BaseExpenses: 23, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    160, BaseIncome: 12, BaseExpenses: 4, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 48, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "manufacturing_plant", Name: "Manufacturing Plant", Sector: "industrial", Rarity: "uncommon",
 		Description: "Modern plant with robotic assistance.",
-		BaseCost:    250, BaseIncome: 16, BaseExpenses: 50, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 3,
+		BaseCost:    250, BaseIncome: 16, BaseExpenses: 7, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 3,
 		UpgradeCostBase: 75, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "mega_factory", Name: "Mega Factory", Sector: "industrial", Rarity: "rare",
 		Description: "Huge facility producing thousands of units hourly.",
-		BaseCost:    300, BaseIncome: 18, BaseExpenses: 112, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 5,
+		BaseCost:    300, BaseIncome: 18, BaseExpenses: 10, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 5,
 		UpgradeCostBase: 100, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "industrial_complex", Name: "Industrial Complex", Sector: "industrial", Rarity: "epic",
 		Description: "An entire industrial park under your control.",
-		BaseCost:    620, BaseIncome: 30, BaseExpenses: 245, WorkerSlots: 10, ResearchPerHour: 0, UnlockLevel: 8,
+		BaseCost:    620, BaseIncome: 30, BaseExpenses: 16, WorkerSlots: 10, ResearchPerHour: 0, UnlockLevel: 8,
 		UpgradeCostBase: 220, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
@@ -282,37 +282,37 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "solar_farm", Name: "Solar Farm", Sector: "energy", Rarity: "common",
 		Description: "Solar panels converting sunlight into steady income.",
-		BaseCost:    50, BaseIncome: 4, BaseExpenses: 6, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    50, BaseIncome: 4, BaseExpenses: 1, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 20, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "wind_farm", Name: "Wind Farm", Sector: "energy", Rarity: "common",
 		Description: "Turbines on a windy ridge selling clean power.",
-		BaseCost:    120, BaseIncome: 8, BaseExpenses: 13, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    120, BaseIncome: 8, BaseExpenses: 2, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 45, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "hydro_plant", Name: "Hydro Plant", Sector: "energy", Rarity: "uncommon",
 		Description: "Hydroelectric station on the river.",
-		BaseCost:    180, BaseIncome: 10, BaseExpenses: 30, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    180, BaseIncome: 10, BaseExpenses: 3, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 55, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "power_station", Name: "Power Station", Sector: "energy", Rarity: "rare",
 		Description: "Central station supplying the whole district.",
-		BaseCost:    240, BaseIncome: 14, BaseExpenses: 70, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 4,
+		BaseCost:    240, BaseIncome: 14, BaseExpenses: 7, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 4,
 		UpgradeCostBase: 75, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "nuclear_plant", Name: "Nuclear Plant", Sector: "energy", Rarity: "epic",
 		Description: "Nuclear power with massive output.",
-		BaseCost:    500, BaseIncome: 21, BaseExpenses: 160, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 7,
+		BaseCost:    500, BaseIncome: 21, BaseExpenses: 12, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 7,
 		UpgradeCostBase: 120, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
-		ID: "fusion_plant", Name: "Fusion Plant", Sector: "energy", Rarity: "legendary",
+		ID: "fusion_plant", Name: "Fusion Plant", Sector: "30", Rarity: "legendary",
 		Description: "Fusion reactor — the future of energy.",
-		BaseCost:    1000, BaseIncome: 38, BaseExpenses: 360, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 11,
+		BaseCost:    1000, BaseIncome: 38, BaseExpenses: 15, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 11,
 		UpgradeCostBase: 200, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
@@ -320,37 +320,37 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "mini_market", Name: "Mini Market", Sector: "trade", Rarity: "common",
 		Description: "Neighborhood store with daily regulars.",
-		BaseCost:    30, BaseIncome: 2, BaseExpenses: 4, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    30, BaseIncome: 2, BaseExpenses: 1, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 6, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "store", Name: "Store", Sector: "trade", Rarity: "common",
 		Description: "Street-level retail with a wide assortment.",
-		BaseCost:    70, BaseIncome: 5, BaseExpenses: 8, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    70, BaseIncome: 5, BaseExpenses: 2, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 14, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "supermarket", Name: "Supermarket", Sector: "trade", Rarity: "uncommon",
 		Description: "Full-size supermarket with high turnover.",
-		BaseCost:    170, BaseIncome: 10, BaseExpenses: 19, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    170, BaseIncome: 10, BaseExpenses: 4, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 30, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "shopping_center", Name: "Shopping Center", Sector: "trade", Rarity: "uncommon",
 		Description: "A center hosting dozens of retailers.",
-		BaseCost:    400, BaseIncome: 22, BaseExpenses: 43, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 3,
+		BaseCost:    400, BaseIncome: 22, BaseExpenses: 8, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 3,
 		UpgradeCostBase: 60, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "mall", Name: "Mall", Sector: "trade", Rarity: "rare",
 		Description: "City mall with anchor stores and food court.",
-		BaseCost:    600, BaseIncome: 28, BaseExpenses: 98, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 5,
+		BaseCost:    600, BaseIncome: 28, BaseExpenses: 12, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 5,
 		UpgradeCostBase: 90, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "global_marketplace", Name: "Global Marketplace", Sector: "trade", Rarity: "epic",
 		Description: "Online marketplace shipping worldwide.",
-		BaseCost:    900, BaseIncome: 34, BaseExpenses: 230, WorkerSlots: 10, ResearchPerHour: 0, UnlockLevel: 9,
+		BaseCost:    900, BaseIncome: 34, BaseExpenses: 15, WorkerSlots: 10, ResearchPerHour: 0, UnlockLevel: 9,
 		UpgradeCostBase: 120, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
@@ -358,37 +358,37 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "server_rack", Name: "Server Rack", Sector: "tech", Rarity: "common",
 		Description: "A rented rack hosting services.",
-		BaseCost:    100, BaseIncome: 4, BaseExpenses: 12, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    100, BaseIncome: 4, BaseExpenses: 1, WorkerSlots: 1, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 26, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "data_center", Name: "Data Center", Sector: "tech", Rarity: "uncommon",
 		Description: "Facility selling compute and storage.",
-		BaseCost:    500, BaseIncome: 24, BaseExpenses: 28, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    500, BaseIncome: 24, BaseExpenses: 5, WorkerSlots: 3, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 50, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "cloud_cluster", Name: "Cloud Cluster", Sector: "tech", Rarity: "rare",
 		Description: "Elastic cloud infrastructure on demand.",
-		BaseCost:    700, BaseIncome: 30, BaseExpenses: 66, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 4,
+		BaseCost:    700, BaseIncome: 30, BaseExpenses: 7, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 4,
 		UpgradeCostBase: 70, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "ai_facility", Name: "AI Facility", Sector: "tech", Rarity: "epic",
 		Description: "GPU cluster training and renting AI models.",
-		BaseCost:    1000, BaseIncome: 40, BaseExpenses: 175, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 7,
+		BaseCost:    1000, BaseIncome: 40, BaseExpenses: 10, WorkerSlots: 6, ResearchPerHour: 0, UnlockLevel: 7,
 		UpgradeCostBase: 120, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "quantum_lab", Name: "Quantum Lab", Sector: "tech", Rarity: "legendary",
 		Description: "Research lab selling quantum computing access.",
-		BaseCost:    1200, BaseIncome: 44, BaseExpenses: 470, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 11,
+		BaseCost:    1200, BaseIncome: 44, BaseExpenses: 16, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 11,
 		UpgradeCostBase: 150, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "satellite_network", Name: "Satellite Network", Sector: "tech", Rarity: "legendary",
 		Description: "Constellation of satellites selling global connectivity.",
-		BaseCost:    1500, BaseIncome: 50, BaseExpenses: 1200, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 15,
+		BaseCost:    1500, BaseIncome: 50, BaseExpenses: 18, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 15,
 		UpgradeCostBase: 170, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
@@ -396,37 +396,37 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "restaurant", Name: "Restaurant", Sector: "luxury", Rarity: "common",
 		Description: "Cozy restaurant with a loyal clientele.",
-		BaseCost:    200, BaseIncome: 10, BaseExpenses: 14, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
+		BaseCost:    200, BaseIncome: 10, BaseExpenses: 1, WorkerSlots: 2, ResearchPerHour: 0, UnlockLevel: 1,
 		UpgradeCostBase: 40, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "hotel", Name: "Hotel", Sector: "luxury", Rarity: "uncommon",
 		Description: "City hotel with high occupancy.",
-		BaseCost:    300, BaseIncome: 14, BaseExpenses: 36, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
+		BaseCost:    300, BaseIncome: 14, BaseExpenses: 2, WorkerSlots: 4, ResearchPerHour: 0, UnlockLevel: 2,
 		UpgradeCostBase: 1500, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "casino", Name: "Casino", Sector: "luxury", Rarity: "rare",
 		Description: "The house always wins.",
-		BaseCost:    700, BaseIncome: 28, BaseExpenses: 115, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 4,
+		BaseCost:    700, BaseIncome: 28, BaseExpenses: 4, WorkerSlots: 5, ResearchPerHour: 0, UnlockLevel: 4,
 		UpgradeCostBase: 4800, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "resort", Name: "Resort", Sector: "luxury", Rarity: "epic",
 		Description: "Beach resort with premium pricing.",
-		BaseCost:    900, BaseIncome: 34, BaseExpenses: 295, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 7,
+		BaseCost:    900, BaseIncome: 34, BaseExpenses: 7, WorkerSlots: 7, ResearchPerHour: 0, UnlockLevel: 7,
 		UpgradeCostBase: 132, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "private_island", Name: "Private Island", Sector: "luxury", Rarity: "legendary",
 		Description: "Your own island — hotel, marina, helipad.",
-		BaseCost:    1600, BaseIncome: 50, BaseExpenses: 740, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 11,
+		BaseCost:    1600, BaseIncome: 50, BaseExpenses: 15, WorkerSlots: 8, ResearchPerHour: 0, UnlockLevel: 11,
 		UpgradeCostBase: 360, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "space_tourism", Name: "Space Tourism Center", Sector: "luxury", Rarity: "legendary",
 		Description: "Suborbital flights for the ultra-wealthy.",
-		BaseCost:    2500, BaseIncome: 80, BaseExpenses: 1800, WorkerSlots: 9, ResearchPerHour: 0, UnlockLevel: 16,
+		BaseCost:    2500, BaseIncome: 80, BaseExpenses: 22, WorkerSlots: 9, ResearchPerHour: 0, UnlockLevel: 16,
 		UpgradeCostBase: 500, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 
@@ -436,37 +436,37 @@ var EmpireObjects = []EmpireObjectDef{
 	{
 		ID: "research_lab", Name: "Research Lab", Sector: "research", Rarity: "uncommon",
 		Description: "Basic lab generating research points.",
-		BaseCost:    150, BaseIncome: 10, BaseExpenses: 30, WorkerSlots: 2, ResearchPerHour: 2, UnlockLevel: 2,
+		BaseCost:    150, BaseIncome: 7, BaseExpenses: 1, WorkerSlots: 2, ResearchPerHour: 2, UnlockLevel: 2,
 		UpgradeCostBase: 15, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "science_institute", Name: "Science Institute", Sector: "research", Rarity: "rare",
 		Description: "Institute running multiple research programs.",
-		BaseCost:    300, BaseIncome: 20, BaseExpenses: 72, WorkerSlots: 4, ResearchPerHour: 4, UnlockLevel: 3,
+		BaseCost:    300, BaseIncome: 14, BaseExpenses: 2, WorkerSlots: 4, ResearchPerHour: 4, UnlockLevel: 3,
 		UpgradeCostBase: 30, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "rnd_center", Name: "R&D Center", Sector: "research", Rarity: "rare",
 		Description: "Corporate R&D with applied science focus.",
-		BaseCost:    600, BaseIncome: 18, BaseExpenses: 175, WorkerSlots: 5, ResearchPerHour: 7, UnlockLevel: 5,
+		BaseCost:    600, BaseIncome: 28, BaseExpenses: 4, WorkerSlots: 5, ResearchPerHour: 7, UnlockLevel: 5,
 		UpgradeCostBase: 60, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "innovation_hub", Name: "Innovation Hub", Sector: "research", Rarity: "epic",
 		Description: "Hub spinning up startups and patents.",
-		BaseCost:    900, BaseIncome: 28, BaseExpenses: 420, WorkerSlots: 7, ResearchPerHour: 12, UnlockLevel: 8,
+		BaseCost:    900, BaseIncome: 32, BaseExpenses: 5, WorkerSlots: 7, ResearchPerHour: 12, UnlockLevel: 8,
 		UpgradeCostBase: 90, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "think_tank", Name: "Think Tank", Sector: "research", Rarity: "epic",
 		Description: "Elite analysts generating breakthrough ideas.",
-		BaseCost:    1200, BaseIncome: 32, BaseExpenses: 480, WorkerSlots: 6, ResearchPerHour: 15, UnlockLevel: 9,
+		BaseCost:    1200, BaseIncome: 36, BaseExpenses: 9, WorkerSlots: 6, ResearchPerHour: 15, UnlockLevel: 9,
 		UpgradeCostBase: 120, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 	{
 		ID: "university", Name: "University", Sector: "research", Rarity: "legendary",
 		Description: "Your own university — research at industrial scale.",
-		BaseCost:    1500, BaseIncome: 38, BaseExpenses: 1000, WorkerSlots: 9, ResearchPerHour: 25, UnlockLevel: 13,
+		BaseCost:    1500, BaseIncome: 38, BaseExpenses: 14, WorkerSlots: 9, ResearchPerHour: 25, UnlockLevel: 13,
 		UpgradeCostBase: 150, UpgradeCostMult: 1.55, IncomeMult: 1.22, ExpenseMult: 1.07, ValueMult: 1.18,
 	},
 }
