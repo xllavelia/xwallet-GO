@@ -54,7 +54,7 @@ func AppStatusHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			untilStr = until.UTC().Format(time.RFC3339)
 		}
 		isAdmin := false
-		if user, ok := UserFromContext(r); ok {
+		if user, ok := parseTokenFromRequest(r); ok {
 			isAdmin = user.IsAdmin
 		}
 		w.Header().Set("Content-Type", "application/json")

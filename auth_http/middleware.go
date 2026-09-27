@@ -67,3 +67,27 @@ func toBool(v interface{}) bool {
 	b, _ := v.(bool)
 	return b
 }
+
+func parseTokenFromRequest(r *http.Request) (AuthenticatedUser, bool) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		return AuthenticatedUser{}, false
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		return jwtSecret(), nil
+	})
+	if err != nil || !token.Valid {
+		return AuthenticatedUser{}, false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return AuthenticatedUser{}, false
+	}
+	user := AuthenticatedUser{
+		PlayerID: toString(claims["playerId"]),
+		Username: toString(claims["username"]),
+		IsAdmin:  toBool(claims["isAdmin"]),
+	}
+	return user, true
+}
