@@ -193,21 +193,27 @@ func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID str
 	if err != nil {
 		return err
 	}
+
 	cost := level.SpinsCost * lines
 	if profile.Spins < cost {
 		return errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	// Атомарное списание всей стоимости — защита от двойного клика/гонок.
-	if err := pool.QueryRow(ctx, `
+	// Списание стоимости ВСЕХ линий одним UPDATE — защита от двойного клика.
+	var spinsLeft int
+	var poolLeft float64
+	err = pool.QueryRow(ctx, `
 UPDATE slots_profiles SET spins = spins - $2
 WHERE user_id = $1 AND spins >= $2
-RETURNING spins;`, userID, cost).Scan(new(int)); err != nil {
+RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
+	if err != nil {
 		return errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	spinsRun := profile.Spins
-	poolRun := profile.WagerPool
+	// Значения уже после списания: добавляем обратно cost, чтобы счётчик
+	// линий стартовал с предспинового баланса; пул — из строки после UPDATE.
+	spinsRun := spinsLeft + cost
+	poolRun := poolLeft
 
 	results := make([]lineResult, 0, lines)
 	totalWin := 0.0
@@ -303,10 +309,10 @@ ON CONFLICT (user_id, day) DO UPDATE SET
 	// (фронт читает history DESC и разворачивает обратно).
 	for _, res := range results {
 		if _, err := pool.Exec(ctx, `
-INSERT INTO slots_history (user_id, level_id, reels, win, event)
-VALUES ($1, $2, $3, $4, $5);`,
+INSERT INTO slots_history (user_id, level_id, reels, win, event, lines)
+VALUES ($1, $2, $3, $4, $5, $6);`,
 			userID, level.ID, res.reels[0]+","+res.reels[1]+","+res.reels[2],
-			res.win, res.event); err != nil {
+			res.win, res.event, lines); err != nil {
 			return err
 		}
 	}

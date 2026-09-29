@@ -51,7 +51,7 @@ func BuildState(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string
 	history := []map[string]interface{}{}
 	{
 		rows, err := pool.Query(ctx, `
-SELECT id, level_id, reels, win, event,
+SELECT id, level_id, reels, win, event, lines,
        extract(epoch from created_at)::bigint
 FROM slots_history WHERE user_id = $1
 ORDER BY id DESC LIMIT $2;`, userID, HistoryStateLimit)
@@ -62,15 +62,16 @@ ORDER BY id DESC LIMIT $2;`, userID, HistoryStateLimit)
 			var id int64
 			var levelID, reels, event string
 			var win float64
+			var lineCount int
 			var ts int64
-			if err := rows.Scan(&id, &levelID, &reels, &win, &event, &ts); err != nil {
+			if err := rows.Scan(&id, &levelID, &reels, &win, &event, &lineCount, &ts); err != nil {
 				rows.Close()
 				return nil, err
 			}
 			history = append(history, map[string]interface{}{
 				"id": id, "level_id": levelID,
 				"reels": strings.Split(reels, ","),
-				"win":   round2(win), "event": event, "t": ts,
+				"win":   round2(win), "event": event, "lines": lineCount, "t": ts,
 			})
 		}
 		rows.Close()
