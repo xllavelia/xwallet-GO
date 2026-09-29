@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS slots_history(
 	reels TEXT NOT NULL,
 	win DOUBLE PRECISION NOT NULL DEFAULT 0,
 	event VARCHAR(24) NOT NULL DEFAULT '',
-		lines INT NOT NULL DEFAULT 1,
+	lines INT NOT NULL DEFAULT 1,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -43,9 +43,12 @@ CREATE TABLE IF NOT EXISTS slots_daily(
 	wins INT NOT NULL DEFAULT 0,
 	winnings DOUBLE PRECISION NOT NULL DEFAULT 0,
 	PRIMARY KEY (user_id, day)
-	ALTER TABLE slots_history
-	ADD COLUMN IF NOT EXISTS lines INT NOT NULL DEFAULT 1;
-);`
+);
+
+-- миграция для уже существующей таблицы
+ALTER TABLE slots_history
+	ADD COLUMN IF NOT EXISTS lines INT NOT NULL DEFAULT 1;`
+
 	_, err := pool.Exec(ctx, sqlQuery)
 	return err
 }

@@ -10,6 +10,10 @@ import (
 	"xwallet-server/wallet_sql"
 )
 
+// ============================================================
+// СПРАВОЧНИКИ
+// ============================================================
+
 func findPack(packID string) *SlotsPack {
 	for i := range SlotsPacks {
 		if SlotsPacks[i].ID == packID {
@@ -28,7 +32,8 @@ func findLevel(levelID string) *SlotsLevel {
 	return nil
 }
 
-// Число линий из запроса: 0/не прислали -> 1, иначе только из SlotsLines.
+// validLines — число линий из запроса: не прислали (0) -> 1,
+// иначе только значение из SlotsLines.
 func validLines(lines int) (int, error) {
 	if lines <= 0 {
 		return 1, nil
@@ -41,8 +46,22 @@ func validLines(lines int) (int, error) {
 	return 0, errors.New("unknown lines")
 }
 
-// Покупка набора спинов: деньги списываются с кошелька и уходят
-// в wager_pool — так у каждого спина честная средняя цена.
+// eventBonus — сколько бесплатных спинов даёт событие (0 для не-бонусных).
+func eventBonus(eventID string) int {
+	for _, e := range SlotsEvents {
+		if e.ID == eventID {
+			return e.BonusSpins
+		}
+	}
+	return 0
+}
+
+// ============================================================
+// МАГАЗИН
+// ============================================================
+
+// ActionBuyPack — покупка набора спинов: деньги списываются с кошелька
+// и уходят в wager_pool, так у каждого спина честная средняя цена.
 func ActionBuyPack(ctx context.Context, pool *pgxpool.Pool, userID int, packID string) error {
 	pack := findPack(packID)
 	if pack == nil {
@@ -65,7 +84,11 @@ WHERE user_id = $1;`, userID, pack.Spins, pack.Price)
 	return err
 }
 
-// Один барабан по весам символов пула уровня.
+// ============================================================
+// РОЗЫГРЫШ
+// ============================================================
+
+// rollReel — один барабан по весам символов пула уровня.
 func rollReel(level *SlotsLevel) string {
 	total := 0.0
 	weights := make([]float64, len(level.Pool))
@@ -95,8 +118,9 @@ func rollAll(level *SlotsLevel) [3]string {
 	return reels
 }
 
-// Выплата за комбинацию. Сначала три одинаковых символа (явное правило
-// из таблицы или mult символа), потом wildcard-правила сверху вниз.
+// comboMult — выплата за комбинацию. Сначала три одинаковых символа
+// (явное правило из таблицы или mult символа), потом wildcard-правила
+// сверху вниз.
 func comboMult(reels [3]string) float64 {
 	if reels[0] == reels[1] && reels[1] == reels[2] {
 		for _, c := range SlotsCombos {
@@ -124,14 +148,14 @@ func comboMult(reels [3]string) float64 {
 	return 0
 }
 
-// Итог одной линии.
+// lineResult — итог одной линии.
 type lineResult struct {
 	reels [3]string
 	win   float64
 	event string
 }
 
-// Розыгрыш одной линии: символы, выплата и редкое событие.
+// rollLine — розыгрыш одной линии: символы, выплата и редкое событие.
 // lucky_spin / double_reward перекручивают барабаны до выигрыша,
 // у double_reward выплата удваивается.
 func rollLine(level *SlotsLevel, stake float64) lineResult {
@@ -139,12 +163,10 @@ func rollLine(level *SlotsLevel, stake float64) lineResult {
 	win := round2(comboMult(reels) * level.PayoutMult * stake)
 
 	eventID := ""
-	eventBonusSpins := 0
 	r := rand.Float64()
 	for _, e := range SlotsEvents {
 		if r < e.Weight {
 			eventID = e.ID
-			eventBonusSpins = e.BonusSpins
 			break
 		}
 		r -= e.Weight
@@ -161,24 +183,18 @@ func rollLine(level *SlotsLevel, stake float64) lineResult {
 		}
 	}
 
-	_ = eventBonusSpins
 	return lineResult{reels: reels, win: win, event: eventID}
 }
 
-// Бонусные спины события (только bonus_round что-то начисляет).
-func eventBonus(eventID string) int {
-	for _, e := range SlotsEvents {
-		if e.ID == eventID {
-			return e.BonusSpins
-		}
-	}
-	return 0
-}
+// ============================================================
+// СПИН
+// ============================================================
 
-// Спин на lines строк: стоимость = SpinsCost уровня × lines, списывается
-// одним атомарным UPDATE, дальше lines независимых розыгрышей.
-// Номинал каждой строки считается из пула на её момент — как если бы
-// игрок дёрнул рычаг lines раз подряд.
+// ActionSpin — спин на lines строк. Стоимость = SpinsCost уровня × lines
+// и списывается одним атомарным UPDATE. Дальше lines независимых
+// розыгрышей: у каждой строки свои барабаны, своё событие, своя выплата
+// и своя запись в истории. Номинал строки считается из пула на её момент,
+// поэтому экономика идентична lines последовательным нажатиям рычага.
 func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID string, lines int) error {
 	level := findLevel(levelID)
 	if level == nil {
@@ -193,13 +209,12 @@ func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID str
 	if err != nil {
 		return err
 	}
-
 	cost := level.SpinsCost * lines
 	if profile.Spins < cost {
 		return errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	// Списание стоимости ВСЕХ линий одним UPDATE — защита от двойного клика.
+	// Атомарное списание стоимости ВСЕХ линий — защита от двойного клика.
 	var spinsLeft int
 	var poolLeft float64
 	err = pool.QueryRow(ctx, `
@@ -210,8 +225,8 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 		return errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	// Значения уже после списания: добавляем обратно cost, чтобы счётчик
-	// линий стартовал с предспинового баланса; пул — из строки после UPDATE.
+	// spinsLeft/poolLeft — уже после списания; возвращаем cost, чтобы счётчик
+	// линий стартовал с предспинового баланса.
 	spinsRun := spinsLeft + cost
 	poolRun := poolLeft
 
@@ -225,8 +240,8 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	biggestWin := profile.BiggestWin
 
 	for i := 0; i < lines; i++ {
-		// Номинал строки — средняя цена спина из пула ставок. Если пул
-		// пуст (игра на бонусных спинах) — крутим по MinStakeUSDT.
+		// Номинал строки — средняя цена спина из пула ставок. Если пул пуст
+		// (игра на бонусных спинах) — крутим по MinStakeUSDT за счёт кассы.
 		stake := MinStakeUSDT
 		if poolRun > 0 && spinsRun > 0 {
 			stake = poolRun / float64(spinsRun)
@@ -266,14 +281,14 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	totalWin = round2(totalWin)
 	totalWagered = round2(totalWagered)
 
-	// Суммарная выплата на кошелёк.
+	// Суммарная выплата на кошелёк одной проводкой.
 	if totalWin > 0 {
 		if err := wallet_sql.AdjustBalance(ctx, pool, userID, totalWin); err != nil {
 			return err
 		}
 	}
 
-	// Бонусные спины от событий (могли выпасть на нескольких строках).
+	// Бонусные спины событий (могли выпасть сразу на нескольких линиях).
 	if bonusSpins > 0 {
 		if _, err := pool.Exec(ctx, `
 UPDATE slots_profiles SET spins = spins + $2 WHERE user_id = $1;`,
@@ -293,7 +308,7 @@ WHERE user_id = $1;`,
 		return err
 	}
 
-	// Дневная статистика: каждая строка считается за спин.
+	// Дневная статистика: каждая линия считается за спин.
 	if _, err := pool.Exec(ctx, `
 INSERT INTO slots_daily (user_id, day, spins, wins, winnings)
 VALUES ($1, CURRENT_DATE, $2, $3, $4)
@@ -305,7 +320,7 @@ ON CONFLICT (user_id, day) DO UPDATE SET
 		return err
 	}
 
-	// По строке истории на каждую линию, ПОРЯДОК = порядок строк в машине
+	// По записи истории на каждую линию, в порядке строк машины сверху вниз
 	// (фронт читает history DESC и разворачивает обратно).
 	for _, res := range results {
 		if _, err := pool.Exec(ctx, `
@@ -316,6 +331,7 @@ VALUES ($1, $2, $3, $4, $5, $6);`,
 			return err
 		}
 	}
+
 	_, _ = pool.Exec(ctx, `
 DELETE FROM slots_history
 WHERE user_id = $1

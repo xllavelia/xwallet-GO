@@ -28,7 +28,7 @@ func getUserID(r *http.Request, pool *pgxpool.Pool) (int, bool) {
 	return userID, true
 }
 
-// Единый формат ошибки по контракту фронта: {"error": msg}
+// writeError — единый формат ошибки по контракту фронта: {"error": msg}
 func writeError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -57,9 +57,11 @@ func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // ============================================================
-// POST /slots/action — {"action":"spin","level_id":...} |
-//                       {"action":"buy_pack","pack_id":...}
+// POST /slots/action
+//   {"action":"spin","level_id":"premium","lines":3}
+//   {"action":"buy_pack","pack_id":"medium"}
 // Успех -> свежее полное состояние; ошибка -> 400 {"error": msg}
+// lines не прислан -> 1 (старые клиенты работают как раньше).
 // ============================================================
 
 func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -83,6 +85,7 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			writeError(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+
 		var err error
 		switch req.Action {
 		case "spin":
@@ -97,6 +100,7 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			writeError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
 		state, err := slots_sql.BuildState(r.Context(), pool, userID)
 		if err != nil {
 			writeError(w, err.Error(), http.StatusInternalServerError)

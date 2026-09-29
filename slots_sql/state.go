@@ -42,6 +42,7 @@ ON CONFLICT (user_id) DO NOTHING;`, userID)
 	return p, err
 }
 
+// BuildState — полный ответ фронта: баланс спинов, история, статистика, конфиг.
 func BuildState(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]interface{}, error) {
 	profile, err := GetOrCreateProfile(ctx, pool, userID)
 	if err != nil {
@@ -71,13 +72,14 @@ ORDER BY id DESC LIMIT $2;`, userID, HistoryStateLimit)
 			history = append(history, map[string]interface{}{
 				"id": id, "level_id": levelID,
 				"reels": strings.Split(reels, ","),
-				"win":   round2(win), "event": event, "lines": lineCount, "t": ts,
+				"win":   round2(win), "event": event,
+				"lines": lineCount, "t": ts,
 			})
 		}
 		rows.Close()
 	}
 
-	// Сегодняшняя статистика (0, если сегодня ещё не крутили).
+	// Сегодняшняя статистика (нули, если сегодня ещё не крутили).
 	var spinsToday, winsToday int
 	var winningsToday float64
 	_ = pool.QueryRow(ctx, `
@@ -122,6 +124,7 @@ WHERE user_id = $1 AND day = CURRENT_DATE;`, userID).
 	}, nil
 }
 
+// buildConfigDTO — игровая математика для фронта (иконки, payouts, odds).
 func buildConfigDTO() map[string]interface{} {
 	symbols := []map[string]interface{}{}
 	for _, s := range SlotsSymbols {

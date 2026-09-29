@@ -27,6 +27,7 @@ var SlotsSymbols = []SlotsSymbol{
 	{ID: "bank", Name: "Bank", Weight: 8, Mult: 10},
 	{ID: "crystal", Name: "Crystal", Weight: 5, Mult: 15},
 	{ID: "crown", Name: "Crown", Weight: 3, Mult: 25},
+
 	{ID: "diamond", Name: "Diamond", Weight: 1.5, Mult: 70},
 }
 
@@ -127,6 +128,7 @@ var SlotsEvents = []SlotsEvent{
 const (
 	// Сколько последних спинов отдаём в state для блока истории.
 	HistoryStateLimit = 10
+
 	// Сколько строк истории храним в таблице (старые подчищаются).
 	HistoryKeepLimit = 200
 	// Номинал спина, когда пул ставок пуст (игра только на бонусных
