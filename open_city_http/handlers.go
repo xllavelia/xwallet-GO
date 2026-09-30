@@ -11,6 +11,10 @@ import (
 	"xwallet-server/users_sql"
 )
 
+// ============================================================
+// АУТЕНТИФИКАЦИЯ — общая JWT/auth система XWallet (как в slots_http)
+// ============================================================
+
 func getUserID(r *http.Request, pool *pgxpool.Pool) (int, bool) {
 	authUser, ok := auth_http.UserFromContext(r)
 	if !ok {
@@ -29,7 +33,12 @@ func writeError(w http.ResponseWriter, message string, status int) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"error": message})
 }
 
-// GET /opencity/state — полное состояние.
+// ============================================================
+// GET /opencity/state — полное состояние; при первом входе
+// состояние создаётся само и отдаётся уже готовое (со стартовым
+// набором и экипированным пистолетом).
+// ============================================================
+
 func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := getUserID(r, pool)
@@ -47,23 +56,36 @@ func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// GET /opencity/dict — словарь русских строк.
-func DictHandler() http.HandlerFunc {
+// ============================================================
+// GET /opencity/dict — словарь русских строк (диалоги/квесты).
+// ============================================================
+
+func DictHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		_, ok := getUserID(r, pool)
+		if !ok {
+			writeError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"dict": open_city_sql.Dict})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"dict": open_city_sql.Dict,
+		})
 	}
 }
 
+// ============================================================
 // POST /opencity/action
-//
-//	{"action":"move","location":"downtown","x":12,"y":-5}
-//	{"action":"enemy_down","enemy_id":"thug"}
-//	{"action":"allocate","stat":"damage"}
-//	{"action":"respawn"}
-//	{"action":"claim_reward","reward_id":"first_visit"}
-//	{"action":"inventory","op":"add","item_id":"apple_pie","qty":2}
-//	{"action":"save_progress","patch":{"equipment":{"weapon":"pistol"}}}
+//   {"action":"move","location":"downtown","x":12,"y":-5}
+//   {"action":"claim_reward","reward_id":"first_visit"}
+//   {"action":"inventory","op":"add","item_id":"apple_pie","qty":2}
+//   {"action":"save_progress","patch":{"tutorial_step":3}}
+//   {"action":"gain_xp","source":"kill.thug"}        — XP из каталога
+//   {"action":"allocate_skill","stat":"damage"}       — 1 очко в стат
+//   {"action":"equip_weapon","item_id":"pistol"}      — "" = убрать
+// Успех -> свежее полное состояние; ошибка -> 400 {"error": msg}
+// ============================================================
+
 func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -81,12 +103,12 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			Location string                 `json:"location"`
 			X        float64                `json:"x"`
 			Y        float64                `json:"y"`
-			EnemyID  string                 `json:"enemy_id"`
-			Stat     string                 `json:"stat"`
 			RewardID string                 `json:"reward_id"`
 			Op       string                 `json:"op"`
 			ItemID   string                 `json:"item_id"`
 			Qty      int                    `json:"qty"`
+			Source   string                 `json:"source"`
+			Stat     string                 `json:"stat"`
 			Patch    map[string]interface{} `json:"patch"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,18 +121,18 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		switch req.Action {
 		case "move":
 			err = open_city_sql.ActionMove(ctx, pool, userID, req.Location, req.X, req.Y)
-		case "enemy_down":
-			err = open_city_sql.ActionEnemyDown(ctx, pool, userID, req.EnemyID)
-		case "allocate":
-			err = open_city_sql.ActionAllocate(ctx, pool, userID, req.Stat)
-		case "respawn":
-			err = open_city_sql.ActionRespawn(ctx, pool, userID)
 		case "claim_reward":
 			err = open_city_sql.ActionClaimReward(ctx, pool, userID, req.RewardID)
 		case "inventory":
 			err = open_city_sql.ActionInventory(ctx, pool, userID, req.Op, req.ItemID, req.Qty)
 		case "save_progress":
 			err = open_city_sql.ActionSaveProgress(ctx, pool, userID, req.Patch)
+		case "gain_xp":
+			err = open_city_sql.ActionGainXP(ctx, pool, userID, req.Source)
+		case "allocate_skill":
+			err = open_city_sql.ActionAllocateSkill(ctx, pool, userID, req.Stat)
+		case "equip_weapon":
+			err = open_city_sql.ActionEquipWeapon(ctx, pool, userID, req.ItemID)
 		default:
 			writeError(w, "unknown action", http.StatusBadRequest)
 			return
@@ -120,7 +142,7 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		state, err := open_city_sql.BuildState(ctx, pool, userID)
+		state, err := open_city_sql.BuildState(r.Context(), pool, userID)
 		if err != nil {
 			writeError(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -11,29 +11,43 @@ import (
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 type Player struct {
-	UserID       int
-	DOC          float64
-	Level        int
-	XP           int
-	Health       int
-	MaxHealth    int
-	PosX         float64
-	PosY         float64
-	Location     string
-	BaseProgress map[string]interface{}
+	UserID         int
+	DOC            float64
+	Level          int
+	XP             int
+	SkillPoints    int
+	Health         int
+	MaxHealth      int
+	PosX           float64
+	PosY           float64
+	Location       string
+	StatsAllocated map[string]int
+	EquippedWeapon string
+	BaseProgress   map[string]interface{}
 }
 
-// GetOrCreatePlayer — при первом входе создаёт начальное состояние.
+// GetOrCreatePlayer — при первом входе создаёт начальное состояние
+// и выдаёт стартовый набор: пистолет (сразу экипирован) + патроны.
 func GetOrCreatePlayer(ctx context.Context, pool *pgxpool.Pool, userID int) (*Player, error) {
-	p := &Player{UserID: userID, BaseProgress: map[string]interface{}{}}
-	var rawProgress []byte
+	p := &Player{
+		UserID:         userID,
+		StatsAllocated: map[string]int{},
+		BaseProgress:   map[string]interface{}{},
+	}
+	var rawStats, rawProgress []byte
 	err := pool.QueryRow(ctx, `
-SELECT doc_balance, level, xp, health, max_health,
-       pos_x, pos_y, location, base_progress
+SELECT doc_balance, level, xp, skill_points, health, max_health,
+       pos_x, pos_y, location, stats, equipped_weapon, base_progress
 FROM open_city_state WHERE user_id = $1;`, userID).
-		Scan(&p.DOC, &p.Level, &p.XP, &p.Health, &p.MaxHealth,
-			&p.PosX, &p.PosY, &p.Location, &rawProgress)
+		Scan(&p.DOC, &p.Level, &p.XP, &p.SkillPoints, &p.Health, &p.MaxHealth,
+			&p.PosX, &p.PosY, &p.Location, &rawStats, &p.EquippedWeapon, &rawProgress)
 	if err == nil {
+		if len(rawStats) > 0 {
+			_ = json.Unmarshal(rawStats, &p.StatsAllocated)
+		}
+		if p.StatsAllocated == nil {
+			p.StatsAllocated = map[string]int{}
+		}
 		if len(rawProgress) > 0 {
 			_ = json.Unmarshal(rawProgress, &p.BaseProgress)
 		}
@@ -42,13 +56,22 @@ FROM open_city_state WHERE user_id = $1;`, userID).
 		}
 		return p, nil
 	}
-	_, err = pool.Exec(ctx, `
-INSERT INTO open_city_state (user_id, level, xp, health, max_health, location, pos_x, pos_y)
-VALUES ($1, $2, $3, $4, $5, 'downtown', 800, 800)
+	res, err := pool.Exec(ctx, `
+INSERT INTO open_city_state (user_id, level, xp, health, max_health, location, pos_x, pos_y, equipped_weapon)
+VALUES ($1, $2, $3, $4, $5, 'downtown', 800, 800, 'pistol')
 ON CONFLICT (user_id) DO NOTHING;`,
 		userID, StartLevel, StartXP, StartHealth, StartMaxHealth)
 	if err != nil {
 		return nil, err
+	}
+	if res.RowsAffected() > 0 {
+		// стартовый набор новичка — только при самом первом создании
+		_, _ = pool.Exec(ctx, `
+INSERT INTO open_city_inventory (user_id, item_id, qty) VALUES ($1, 'pistol', 1)
+ON CONFLICT (user_id, item_id) DO NOTHING;`, userID)
+		_, _ = pool.Exec(ctx, `
+INSERT INTO open_city_inventory (user_id, item_id, qty) VALUES ($1, 'pistol_ammo', 24)
+ON CONFLICT (user_id, item_id) DO NOTHING;`, userID)
 	}
 	p.Level = StartLevel
 	p.XP = StartXP
@@ -57,44 +80,14 @@ ON CONFLICT (user_id) DO NOTHING;`,
 	p.Location = "downtown"
 	p.PosX = 800
 	p.PosY = 800
+	p.EquippedWeapon = "pistol"
 	return p, nil
 }
 
-// intFromAny — JSONB числа приходят float64.
-func intFromAny(v interface{}) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	}
-	return 0
-}
-
-// StatsFromProgress — stats из base_progress с дефолтами.
-func StatsFromProgress(base map[string]interface{}) map[string]interface{} {
-	stats := DefaultStats()
-	if m, ok := base["stats"].(map[string]interface{}); ok {
-		for k := range stats {
-			if v, ok2 := m[k]; ok2 {
-				stats[k] = v
-			}
-		}
-	}
-	return stats
-}
-
-// EquippedWeaponFromProgress — id экипированного оружия или "".
-func EquippedWeaponFromProgress(base map[string]interface{}) string {
-	if eq, ok := base["equipment"].(map[string]interface{}); ok {
-		if w, ok2 := eq["weapon"].(string); ok2 {
-			return w
-		}
-	}
-	return ""
-}
-
-// BuildState — единый полный ответ для frontend одним запросом.
+// BuildState — единый полный ответ для frontend одним запросом:
+// player (уровень/XP/очки/характеристики/экипировка) + balances +
+// position + inventory + progress. DOC — только здесь, в balances,
+// и никак не связан с предметами инвентаря.
 func BuildState(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]interface{}, error) {
 	player, err := GetOrCreatePlayer(ctx, pool, userID)
 	if err != nil {
@@ -155,15 +148,17 @@ ORDER BY quest_id;`, userID)
 		rows.Close()
 	}
 
-	stats := StatsFromProgress(player.BaseProgress)
-
 	return map[string]interface{}{
 		"player": map[string]interface{}{
-			"level":      player.Level,
-			"xp":         player.XP,
-			"xp_next":    XPNeeded(player.Level),
-			"health":     player.Health,
-			"max_health": player.MaxHealth,
+			"level":           player.Level,
+			"xp":              player.XP,
+			"xp_next":         XPNeeded(player.Level),
+			"skill_points":    player.SkillPoints,
+			"health":          player.Health,
+			"max_health":      player.MaxHealth,
+			"stats":           ComputeStats(player.Level, player.StatsAllocated),
+			"stats_allocated": player.StatsAllocated,
+			"equipped_weapon": player.EquippedWeapon,
 		},
 		"balances": map[string]interface{}{
 			"doc": round2(player.DOC),
@@ -177,11 +172,6 @@ ORDER BY quest_id;`, userID)
 		"progress": map[string]interface{}{
 			"base":   player.BaseProgress,
 			"quests": quests,
-		},
-		"character": map[string]interface{}{
-			"stats":           stats,
-			"equipped_weapon": EquippedWeaponFromProgress(player.BaseProgress),
-			"skill_points":    intFromAny(stats["skill_points"]),
 		},
 	}, nil
 }

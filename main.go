@@ -363,7 +363,7 @@ func main() {
 	http.HandleFunc("/slots/action", auth_http.WithCORS(auth_http.RequireAuth(slots_http.ActionHandler(pool))))
 	http.HandleFunc("/opencity/state", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.StateHandler(pool))))
 	http.HandleFunc("/opencity/action", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.ActionHandler(pool))))
-	http.HandleFunc("/opencity/dict", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.DictHandler())))
+	http.HandleFunc("/opencity/dict", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.DictHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

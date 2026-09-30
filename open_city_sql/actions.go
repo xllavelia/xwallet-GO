@@ -9,10 +9,16 @@ import (
 )
 
 // ============================================================
-// ВСЕ ОПЕРАЦИИ С DOC/XP/СТАТАМИ — ТОЛЬКО СЕРВЕРНЫЕ.
-// Frontend присылает id врага/стат, размеры и проверки живут здесь.
+// ВСЕ ОПЕРАЦИИ С DOC — ТОЛЬКО СЕРВЕРНЫЕ.
+// Frontend никогда не присылает суммы: он отправляет id награды
+// или серверные действия, а размер и проверки живут здесь.
+// Любое изменение DOC идёт через атомарный UPDATE с RETURNING.
+// То же касается XP и характеристик: клиент присылает только
+// ключи источников, всё считает сервер.
 // ============================================================
 
+// awardDOC — внутреннее начисление (будущие миссии, квесты, NPC).
+// Экспортировано для следующих этапов; из handlers не вызывается напрямую.
 func awardDOC(ctx context.Context, pool *pgxpool.Pool, userID int, amount float64) error {
 	if amount <= 0 {
 		return nil
@@ -20,7 +26,8 @@ func awardDOC(ctx context.Context, pool *pgxpool.Pool, userID int, amount float6
 	var balance float64
 	err := pool.QueryRow(ctx, `
 UPDATE open_city_state
-SET doc_balance = doc_balance + $2, updated_at = now()
+SET doc_balance = doc_balance + $2,
+    updated_at = now()
 WHERE user_id = $1 AND doc_balance + $2 >= 0
 RETURNING doc_balance;`, userID, amount).Scan(&balance)
 	if err != nil {
@@ -29,6 +36,7 @@ RETURNING doc_balance;`, userID, amount).Scan(&balance)
 	return nil
 }
 
+// spendDOC — списание с проверкой достатка.
 func spendDOC(ctx context.Context, pool *pgxpool.Pool, userID int, amount float64) error {
 	if amount <= 0 {
 		return errors.New("invalid amount")
@@ -36,7 +44,8 @@ func spendDOC(ctx context.Context, pool *pgxpool.Pool, userID int, amount float6
 	var balance float64
 	err := pool.QueryRow(ctx, `
 UPDATE open_city_state
-SET doc_balance = doc_balance - $2, updated_at = now()
+SET doc_balance = doc_balance - $2,
+    updated_at = now()
 WHERE user_id = $1 AND doc_balance >= $2
 RETURNING doc_balance;`, userID, amount).Scan(&balance)
 	if err != nil {
@@ -45,7 +54,8 @@ RETURNING doc_balance;`, userID, amount).Scan(&balance)
 	return nil
 }
 
-// ActionMove — сохранение позиции с клэмпом в границы локации.
+// ActionMove — сохранение позиции. Координаты клэмпятся в границы
+// локации из каталога; неизвестная локация отклоняется.
 func ActionMove(ctx context.Context, pool *pgxpool.Pool, userID int, location string, x, y float64) error {
 	loc := LocationByID[location]
 	if loc == nil {
@@ -70,93 +80,8 @@ WHERE user_id = $1;`, userID, x, y, location)
 	return err
 }
 
-// ActionEnemyDown — клиент сообщает тип убитого врага; XP и level-up
-// считает сервер. Очки прокачки копятся в stats.skill_points.
-func ActionEnemyDown(ctx context.Context, pool *pgxpool.Pool, userID int, enemyID string) error {
-	def := EnemyByID[enemyID]
-	if def == nil {
-		return errors.New("unknown enemy")
-	}
-	player, err := GetOrCreatePlayer(ctx, pool, userID)
-	if err != nil {
-		return err
-	}
-	stats := StatsFromProgress(player.BaseProgress)
-	sp := intFromAny(stats["skill_points"])
-	level, xp := player.Level, player.XP
-	total := xp + def.XP
-	for total >= XPNeeded(level) {
-		total -= XPNeeded(level)
-		level++
-		sp += SkillPointsPerLevel
-	}
-	stats["skill_points"] = sp
-	raw, err := json.Marshal(stats)
-	if err != nil {
-		return errors.New("stats marshal failed")
-	}
-	_, err = pool.Exec(ctx, `
-UPDATE open_city_state
-SET level = $2, xp = $3,
-    base_progress = jsonb_set(COALESCE(base_progress, '{}'::jsonb), '{stats}', $4::jsonb, true),
-    updated_at = now()
-WHERE user_id = $1;`, userID, level, total, string(raw))
-	return err
-}
-
-// ActionAllocate — вложить одно очко прокачки в характеристику.
-// Max HP поднимает и колонку max_health, и heals на прирост.
-func ActionAllocate(ctx context.Context, pool *pgxpool.Pool, userID int, stat string) error {
-	if !AllocatableStats[stat] {
-		return errors.New("unknown stat")
-	}
-	player, err := GetOrCreatePlayer(ctx, pool, userID)
-	if err != nil {
-		return err
-	}
-	stats := StatsFromProgress(player.BaseProgress)
-	sp := intFromAny(stats["skill_points"])
-	if sp <= 0 {
-		return errors.New("no skill points")
-	}
-	cur := intFromAny(stats[stat])
-	if cur >= StatMax {
-		return errors.New("stat maxed")
-	}
-	stats["skill_points"] = sp - 1
-	stats[stat] = cur + 1
-	raw, err := json.Marshal(stats)
-	if err != nil {
-		return errors.New("stats marshal failed")
-	}
-	if stat == "max_hp" {
-		_, err = pool.Exec(ctx, `
-UPDATE open_city_state
-SET max_health = max_health + $2,
-    health = LEAST(health + $2, max_health + $2),
-    base_progress = jsonb_set(COALESCE(base_progress, '{}'::jsonb), '{stats}', $3::jsonb, true),
-    updated_at = now()
-WHERE user_id = $1;`, userID, MaxHPPerPoint, string(raw))
-		return err
-	}
-	_, err = pool.Exec(ctx, `
-UPDATE open_city_state
-SET base_progress = jsonb_set(COALESCE(base_progress, '{}'::jsonb), '{stats}', $2::jsonb, true),
-    updated_at = now()
-WHERE user_id = $1;`, userID, string(raw))
-	return err
-}
-
-// ActionRespawn — полное исцеление после смерти (позицию ставит клиент move'ом).
-func ActionRespawn(ctx context.Context, pool *pgxpool.Pool, userID int) error {
-	_, err := pool.Exec(ctx, `
-UPDATE open_city_state
-SET health = max_health, updated_at = now()
-WHERE user_id = $1;`, userID)
-	return err
-}
-
-// ActionClaimReward — разовая награда из каталога.
+// ActionClaimReward — разовая награда из каталога. Размер награды
+// знает только сервер; повторная выдача той же награды отклоняется.
 func ActionClaimReward(ctx context.Context, pool *pgxpool.Pool, userID int, rewardID string) error {
 	reward := RewardByID[rewardID]
 	if reward == nil {
@@ -166,12 +91,15 @@ func ActionClaimReward(ctx context.Context, pool *pgxpool.Pool, userID int, rewa
 	if err != nil {
 		return err
 	}
+
 	claimed, _ := player.BaseProgress["claimed"].([]interface{})
 	for _, c := range claimed {
 		if s, ok := c.(string); ok && s == rewardID {
 			return errors.New("reward already claimed")
 		}
 	}
+
+	// атомарно: размер из каталога + защита от ухода в минус
 	var balance float64
 	err = pool.QueryRow(ctx, `
 UPDATE open_city_state
@@ -180,7 +108,8 @@ SET doc_balance = doc_balance + $2,
         COALESCE(base_progress, '{}'::jsonb),
         '{claimed}',
         COALESCE(base_progress->'claimed', '[]'::jsonb) || to_jsonb($3::text),
-        true),
+        true
+    ),
     updated_at = now()
 WHERE user_id = $1 AND doc_balance + $2 >= 0
 RETURNING doc_balance;`, userID, float64(reward.Doc), rewardID).Scan(&balance)
@@ -190,7 +119,8 @@ RETURNING doc_balance;`, userID, float64(reward.Doc), rewardID).Scan(&balance)
 	return nil
 }
 
-// ActionInventory — добавление/удаление предметов.
+// ActionInventory — добавление/удаление предметов. Каталог валидирует
+// item_id; удаление — атомарным UPDATE с условием qty >= n.
 func ActionInventory(ctx context.Context, pool *pgxpool.Pool, userID int, op, itemID string, qty int) error {
 	if qty < 1 || qty > MaxInventoryQty {
 		return errors.New("invalid qty")
@@ -198,6 +128,7 @@ func ActionInventory(ctx context.Context, pool *pgxpool.Pool, userID int, op, it
 	if ItemByID[itemID] == nil {
 		return errors.New("unknown item")
 	}
+
 	switch op {
 	case "add":
 		_, err := pool.Exec(ctx, `
@@ -207,6 +138,7 @@ ON CONFLICT (user_id, item_id) DO UPDATE SET
     qty = LEAST(open_city_inventory.qty + EXCLUDED.qty, $4);`,
 			userID, itemID, qty, MaxInventoryQty)
 		return err
+
 	case "remove":
 		var left int
 		err := pool.QueryRow(ctx, `
@@ -222,12 +154,15 @@ DELETE FROM open_city_inventory WHERE user_id = $1 AND item_id = $2 AND qty = 0;
 				userID, itemID)
 		}
 		return nil
+
 	default:
 		return errors.New("unknown inventory op")
 	}
 }
 
-// ActionSaveProgress — слияние base_progress по белому списку ключей.
+// ActionSaveProgress — слияние base_progress. Клиент присылает
+// частичный объект; сервер пропускает только разрешённые ключи
+// (AllowedProgressKeys) и режет тело по лимиту байт.
 func ActionSaveProgress(ctx context.Context, pool *pgxpool.Pool, userID int, patch map[string]interface{}) error {
 	if len(patch) == 0 {
 		return nil
@@ -250,5 +185,111 @@ UPDATE open_city_state
 SET base_progress = COALESCE(base_progress, '{}'::jsonb) || $2::jsonb,
     updated_at = now()
 WHERE user_id = $1;`, userID, string(raw))
+	return err
+}
+
+// ============================================================
+// ПРОКАЧКА: XP, характеристики, экипировка.
+// Все значения считает сервер; клиент присылает только ключи.
+// ============================================================
+
+// ActionGainXP — начисление XP по ключу источника из каталога.
+// Левелапы, очки навыков и рост Max HP считает сервер; при
+// левелапе игрок лечится до полного.
+func ActionGainXP(ctx context.Context, pool *pgxpool.Pool, userID int, source string) error {
+	xp, ok := XPRewards[source]
+	if !ok {
+		return errors.New("unknown xp source")
+	}
+	var curXP, level, skillPoints, health int
+	var rawStats []byte
+	err := pool.QueryRow(ctx, `
+SELECT xp, level, skill_points, health, stats
+FROM open_city_state WHERE user_id = $1;`, userID).
+		Scan(&curXP, &level, &skillPoints, &health, &rawStats)
+	if err != nil {
+		return err
+	}
+	pts := map[string]int{}
+	if len(rawStats) > 0 {
+		_ = json.Unmarshal(rawStats, &pts)
+	}
+	curXP += xp
+	leveled := false
+	for curXP >= XPNeeded(level) {
+		curXP -= XPNeeded(level)
+		level++
+		skillPoints += SkillPointsPerLevel
+		leveled = true
+	}
+	maxHealth := StartMaxHealth + (level-1)*LevelMaxHPGrowth + pts["max_hp"]*MaxHPPerPoint
+	if leveled {
+		health = maxHealth // полное лечение при левелапе
+	} else if health > maxHealth {
+		health = maxHealth
+	}
+	_, err = pool.Exec(ctx, `
+UPDATE open_city_state
+SET xp = $2, level = $3, skill_points = $4, max_health = $5, health = $6, updated_at = now()
+WHERE user_id = $1;`, userID, curXP, level, skillPoints, maxHealth, health)
+	return err
+}
+
+// ActionAllocateSkill — вложить одно очко навыка в характеристику
+// из StatDefs. Max HP пересчитывается сразу, текущее HP клэмпится.
+func ActionAllocateSkill(ctx context.Context, pool *pgxpool.Pool, userID int, stat string) error {
+	if !StatByID[stat] {
+		return errors.New("unknown stat")
+	}
+	var skillPoints, level, health int
+	var rawStats []byte
+	err := pool.QueryRow(ctx, `
+SELECT skill_points, level, health, stats FROM open_city_state WHERE user_id = $1;`, userID).
+		Scan(&skillPoints, &level, &health, &rawStats)
+	if err != nil {
+		return err
+	}
+	if skillPoints < 1 {
+		return errors.New("no skill points")
+	}
+	pts := map[string]int{}
+	if len(rawStats) > 0 {
+		_ = json.Unmarshal(rawStats, &pts)
+	}
+	pts[stat]++
+	raw, err := json.Marshal(pts)
+	if err != nil {
+		return errors.New("invalid stats")
+	}
+	maxHealth := StartMaxHealth + (level-1)*LevelMaxHPGrowth + pts["max_hp"]*MaxHPPerPoint
+	if health > maxHealth {
+		health = maxHealth
+	}
+	_, err = pool.Exec(ctx, `
+UPDATE open_city_state
+SET skill_points = $2, stats = $3::jsonb, max_health = $4, health = $5, updated_at = now()
+WHERE user_id = $1;`, userID, skillPoints-1, string(raw), maxHealth, health)
+	return err
+}
+
+// ActionEquipWeapon — экипировать оружие из инвентаря ("" — убрать).
+// Проверка: предмет из каталога kind=weapon и есть в инвентаре
+// в количестве >= 1. Хранится отдельно от предметов — переключение
+// оружия в будущем меняет только эту колонку.
+func ActionEquipWeapon(ctx context.Context, pool *pgxpool.Pool, userID int, itemID string) error {
+	if itemID != "" {
+		def := ItemByID[itemID]
+		if def == nil || def.Kind != "weapon" {
+			return errors.New("not a weapon")
+		}
+		var qty int
+		err := pool.QueryRow(ctx, `
+SELECT qty FROM open_city_inventory WHERE user_id = $1 AND item_id = $2;`, userID, itemID).Scan(&qty)
+		if err != nil || qty < 1 {
+			return errors.New("weapon not in inventory")
+		}
+	}
+	_, err := pool.Exec(ctx, `
+UPDATE open_city_state SET equipped_weapon = $2, updated_at = now() WHERE user_id = $1;`, userID, itemID)
 	return err
 }

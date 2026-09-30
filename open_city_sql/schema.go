@@ -43,7 +43,16 @@ CREATE TABLE IF NOT EXISTS open_city_quests(
 	progress JSONB NOT NULL DEFAULT '{}',
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	PRIMARY KEY (user_id, quest_id)
-);`
+);
+
+-- Прокачка: очки навыков, вложенные очки (по StatDefs),
+-- экипированное оружие. Отдельные колонки, а не base_progress:
+-- их меняет только сервер, клиент лишь читает.
+ALTER TABLE open_city_state
+	ADD COLUMN IF NOT EXISTS skill_points INT NOT NULL DEFAULT 0,
+	ADD COLUMN IF NOT EXISTS stats JSONB NOT NULL DEFAULT '{}',
+	ADD COLUMN IF NOT EXISTS equipped_weapon VARCHAR(64) NOT NULL DEFAULT '';
+`
 
 	_, err := pool.Exec(ctx, sqlQuery)
 	return err
