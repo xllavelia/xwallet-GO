@@ -11,10 +11,6 @@ import (
 	"xwallet-server/users_sql"
 )
 
-// ============================================================
-// АУТЕНТИФИКАЦИЯ — общая JWT/auth система XWallet (как в slots_http)
-// ============================================================
-
 func getUserID(r *http.Request, pool *pgxpool.Pool) (int, bool) {
 	authUser, ok := auth_http.UserFromContext(r)
 	if !ok {
@@ -33,11 +29,7 @@ func writeError(w http.ResponseWriter, message string, status int) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"error": message})
 }
 
-// ============================================================
-// GET /opencity/state — полное состояние; при первом входе
-// состояние создаётся само и отдаётся уже готовое.
-// ============================================================
-
+// GET /opencity/state — полное состояние.
 func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := getUserID(r, pool)
@@ -55,12 +47,7 @@ func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 }
 
-// ============================================================
-// GET /opencity/dict — словарь русских строк (диалоги, квесты,
-// сюжетные тексты). Клиент хардкодит только английские ключи;
-// смена языка = замена dict.go на сервере.
-// ============================================================
-
+// GET /opencity/dict — словарь русских строк.
 func DictHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -68,15 +55,15 @@ func DictHandler() http.HandlerFunc {
 	}
 }
 
-// ============================================================
 // POST /opencity/action
-//   {"action":"move","location":"downtown","x":12,"y":-5}
-//   {"action":"claim_reward","reward_id":"first_visit"}
-//   {"action":"inventory","op":"add","item_id":"apple_pie","qty":2}
-//   {"action":"save_progress","patch":{"tutorial_step":3}}
-// Успех -> свежее полное состояние; ошибка -> 400 {"error": msg}
-// ============================================================
-
+//
+//	{"action":"move","location":"downtown","x":12,"y":-5}
+//	{"action":"enemy_down","enemy_id":"thug"}
+//	{"action":"allocate","stat":"damage"}
+//	{"action":"respawn"}
+//	{"action":"claim_reward","reward_id":"first_visit"}
+//	{"action":"inventory","op":"add","item_id":"apple_pie","qty":2}
+//	{"action":"save_progress","patch":{"equipment":{"weapon":"pistol"}}}
 func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -94,6 +81,8 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			Location string                 `json:"location"`
 			X        float64                `json:"x"`
 			Y        float64                `json:"y"`
+			EnemyID  string                 `json:"enemy_id"`
+			Stat     string                 `json:"stat"`
 			RewardID string                 `json:"reward_id"`
 			Op       string                 `json:"op"`
 			ItemID   string                 `json:"item_id"`
@@ -110,6 +99,12 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		switch req.Action {
 		case "move":
 			err = open_city_sql.ActionMove(ctx, pool, userID, req.Location, req.X, req.Y)
+		case "enemy_down":
+			err = open_city_sql.ActionEnemyDown(ctx, pool, userID, req.EnemyID)
+		case "allocate":
+			err = open_city_sql.ActionAllocate(ctx, pool, userID, req.Stat)
+		case "respawn":
+			err = open_city_sql.ActionRespawn(ctx, pool, userID)
 		case "claim_reward":
 			err = open_city_sql.ActionClaimReward(ctx, pool, userID, req.RewardID)
 		case "inventory":

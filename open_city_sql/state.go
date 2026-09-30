@@ -60,8 +60,41 @@ ON CONFLICT (user_id) DO NOTHING;`,
 	return p, nil
 }
 
-// BuildState — единый полный ответ для frontend одним запросом:
-// player + balances + position + inventory + progress.
+// intFromAny — JSONB числа приходят float64.
+func intFromAny(v interface{}) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
+// StatsFromProgress — stats из base_progress с дефолтами.
+func StatsFromProgress(base map[string]interface{}) map[string]interface{} {
+	stats := DefaultStats()
+	if m, ok := base["stats"].(map[string]interface{}); ok {
+		for k := range stats {
+			if v, ok2 := m[k]; ok2 {
+				stats[k] = v
+			}
+		}
+	}
+	return stats
+}
+
+// EquippedWeaponFromProgress — id экипированного оружия или "".
+func EquippedWeaponFromProgress(base map[string]interface{}) string {
+	if eq, ok := base["equipment"].(map[string]interface{}); ok {
+		if w, ok2 := eq["weapon"].(string); ok2 {
+			return w
+		}
+	}
+	return ""
+}
+
+// BuildState — единый полный ответ для frontend одним запросом.
 func BuildState(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]interface{}, error) {
 	player, err := GetOrCreatePlayer(ctx, pool, userID)
 	if err != nil {
@@ -122,6 +155,8 @@ ORDER BY quest_id;`, userID)
 		rows.Close()
 	}
 
+	stats := StatsFromProgress(player.BaseProgress)
+
 	return map[string]interface{}{
 		"player": map[string]interface{}{
 			"level":      player.Level,
@@ -142,6 +177,11 @@ ORDER BY quest_id;`, userID)
 		"progress": map[string]interface{}{
 			"base":   player.BaseProgress,
 			"quests": quests,
+		},
+		"character": map[string]interface{}{
+			"stats":           stats,
+			"equipped_weapon": EquippedWeaponFromProgress(player.BaseProgress),
+			"skill_points":    intFromAny(stats["skill_points"]),
 		},
 	}, nil
 }

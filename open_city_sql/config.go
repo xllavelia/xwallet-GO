@@ -2,19 +2,15 @@ package open_city_sql
 
 // ============================================================
 // КОНФИГ OPEN CITY
-// Все игровые значения правятся только в этом файле: каталог
-// предметов, локаций, NPC, квестов, разовых наград и лимиты.
-// Все строки игры — на английском; русские диалоги и описания
-// квестов живут в dict.go и подключаются по ключам (TitleKey,
-// DescKey и т.п.) — замена словаря = мгновенная смена языка.
+// Каталоги: предметы, локации, NPC, квесты, награды, враги (XP),
+// прокачка. Строки — английские ключи, русский текст в dict.go.
 // ============================================================
 
 // ---------- Каталог предметов ----------
 // Kind: material | food | weapon | quest
-// Price — ориентировочная цена в DOC (для будущих магазинов).
 type ItemDef struct {
 	ID    string
-	Name  string // английское отображаемое имя
+	Name  string
 	Kind  string
 	Price int
 }
@@ -38,7 +34,6 @@ func init() {
 }
 
 // ---------- Локации ----------
-// Bounds — игровые границы координат; move их учитывает.
 type LocationDef struct {
 	ID   string
 	Name string
@@ -53,6 +48,7 @@ var Locations = []LocationDef{
 	{ID: "industrial", Name: "Industrial District", MinX: 0, MaxX: 1600, MinY: 0, MaxY: 1600},
 	{ID: "suburbs", Name: "Suburbs", MinX: 0, MaxX: 1600, MinY: 0, MaxY: 1600},
 }
+
 var LocationByID = map[string]*LocationDef{}
 
 func init() {
@@ -61,11 +57,11 @@ func init() {
 	}
 }
 
-// ---------- NPC (заглушки-каталог для следующих этапов) ----------
+// ---------- NPC ----------
 type NPCDef struct {
 	ID        string
 	Name      string
-	DialogKey string // ключ в dict.go
+	DialogKey string
 }
 
 var NPCs = []NPCDef{
@@ -74,12 +70,12 @@ var NPCs = []NPCDef{
 	{ID: "dealer", Name: "Dealer Slim", DialogKey: "npc.dealer.greet"},
 }
 
-// ---------- Квесты (каталог; статус хранится в БД) ----------
+// ---------- Квесты ----------
 type QuestDef struct {
 	ID        string
-	TitleKey  string // русский текст в dict.go
+	TitleKey  string
 	DescKey   string
-	RewardDoc int // награда начисляется сервером по завершении
+	RewardDoc int
 }
 
 var Quests = []QuestDef{
@@ -95,7 +91,6 @@ func init() {
 }
 
 // ---------- Разовые награды ----------
-// Frontend отправляет только id награды; размер — фиксированный здесь.
 type RewardDef struct {
 	ID  string
 	Doc int
@@ -114,25 +109,72 @@ func init() {
 	}
 }
 
+// ---------- Враги: XP за убийство ----------
+// Характеристики врагов живут на клиенте; сервер знает только тип и XP.
+type EnemyDef struct {
+	ID   string
+	Name string
+	XP   int
+}
+
+var Enemies = []EnemyDef{
+	{ID: "thug", Name: "Thug", XP: 20},
+	{ID: "brute", Name: "Brute", XP: 45},
+}
+
+var EnemyByID = map[string]*EnemyDef{}
+
+func init() {
+	for i := range Enemies {
+		EnemyByID[Enemies[i].ID] = &Enemies[i]
+	}
+}
+
 // ---------- Прокачка ----------
 const (
 	StartLevel      = 1
 	StartXP         = 0
 	StartHealth     = 100
 	StartMaxHealth  = 100
-	XPBase          = 100  // XP на уровень N = XPBase * N
-	MaxInventoryQty = 99   // максимум одного предмета в стопке
-	MaxProgressJSON = 4096 // байт, лимит тела base_progress
+	XPBase          = 100 // XP на уровень N = XPBase * N
+	MaxInventoryQty = 99
+	MaxProgressJSON = 4096
+
+	SkillPointsPerLevel = 3 // очков за новый уровень
+	StatMax             = 50
+	MaxHPBase           = 100
+	MaxHPPerPoint       = 10
+	DamagePerPoint      = 2
+	DefensePerPoint     = 1
+	SpeedPerPoint       = 8
+	AccuracyPerPointPct = 4 // -4% к cooldown за очко (мин. -40%)
 )
 
+// AllocatableStats — характеристики, в которые можно вкладывать очки.
+var AllocatableStats = map[string]bool{
+	"max_hp": true, "damage": true, "defense": true,
+	"speed": true, "accuracy": true,
+}
+
+// DefaultStats — стартовые характеристики персонажа.
+func DefaultStats() map[string]interface{} {
+	return map[string]interface{}{
+		"max_hp":       MaxHPBase,
+		"damage":       0,
+		"defense":      0,
+		"speed":        0,
+		"accuracy":     0,
+		"skill_points": 0,
+	}
+}
+
 // ---------- Разрешённые ключи base_progress ----------
-// save_progress принимает только эти верхнеуровневые ключи —
-// клиент не может записать в прогресс произвольные данные.
 var AllowedProgressKeys = map[string]bool{
 	"flags":         true,
-	"claimed":       true, // список выданных разовых наград
+	"claimed":       true,
 	"tutorial_step": true,
 	"stats":         true,
+	"equipment":     true, // {"weapon": "pistol"} — экипировка
 }
 
 // XPNeeded — сколько XP требуется для уровня level -> level+1.
