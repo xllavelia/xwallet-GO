@@ -29,6 +29,8 @@ import (
 	"xwallet-server/home_http"
 	"xwallet-server/mining_http"
 	"xwallet-server/mining_sql"
+	"xwallet-server/open_city_http"
+	"xwallet-server/open_city_sql"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
 	"xwallet-server/pixel_engine"
@@ -228,6 +230,9 @@ func main() {
 	if err := slots_sql.MigrateSlotsSchema(ctx, pool); err != nil {
 		log.Fatal("slots migrate: ", err)
 	}
+	if err := open_city_sql.MigrateOpenCitySchema(ctx, pool); err != nil {
+		log.Fatalf("open city migrate: %v", err)
+	}
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -356,6 +361,8 @@ func main() {
 	http.HandleFunc("/empire/action", auth_http.WithCORS(auth_http.RequireAuth(empire_http.ActionHandler(pool))))
 	http.HandleFunc("/slots/state", auth_http.WithCORS(auth_http.RequireAuth(slots_http.StateHandler(pool))))
 	http.HandleFunc("/slots/action", auth_http.WithCORS(auth_http.RequireAuth(slots_http.ActionHandler(pool))))
+	http.HandleFunc("/opencity/state", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.StateHandler(pool))))
+	http.HandleFunc("/opencity/action", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.ActionHandler(pool))))
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
