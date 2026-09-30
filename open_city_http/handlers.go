@@ -56,6 +56,19 @@ func StateHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 // ============================================================
+// GET /opencity/dict — словарь русских строк (диалоги, квесты,
+// сюжетные тексты). Клиент хардкодит только английские ключи;
+// смена языка = замена dict.go на сервере.
+// ============================================================
+
+func DictHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"dict": open_city_sql.Dict})
+	}
+}
+
+// ============================================================
 // POST /opencity/action
 //   {"action":"move","location":"downtown","x":12,"y":-5}
 //   {"action":"claim_reward","reward_id":"first_visit"}
