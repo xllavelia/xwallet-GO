@@ -172,6 +172,9 @@ func main() {
 	if _, err := battlepass_sql.BPEnsureSeason(ctx, pool); err != nil {
 		log.Fatal("battlepass season: ", err)
 	}
+	if err := battlepass_sql.BPRetranslateQuestTitles(ctx, pool); err != nil {
+		log.Fatal("battlepass quest titles: ", err)
+	}
 	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
 		log.Fatal("timed voucher types migration: ", err)
 	}

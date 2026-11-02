@@ -190,28 +190,36 @@ func rollLine(level *SlotsLevel, stake float64) lineResult {
 // СПИН
 // ============================================================
 
+// SpinOutcome — итог спина для прогресса квестов.
+type SpinOutcome struct {
+	Lines        int
+	TotalWin     float64
+	TotalWagered float64
+	Diamonds     int
+}
+
 // ActionSpin — спин на lines строк. Стоимость = SpinsCost уровня × lines
 // и списывается одним атомарным UPDATE. Дальше lines независимых
 // розыгрышей: у каждой строки свои барабаны, своё событие, своя выплата
 // и своя запись в истории. Номинал строки считается из пула на её момент,
 // поэтому экономика идентична lines последовательным нажатиям рычага.
-func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID string, lines int) error {
+func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID string, lines int) (SpinOutcome, error) {
 	level := findLevel(levelID)
 	if level == nil {
-		return errors.New("unknown level")
+		return SpinOutcome{}, errors.New("unknown level")
 	}
 	lines, err := validLines(lines)
 	if err != nil {
-		return err
+		return SpinOutcome{}, err
 	}
 
 	profile, err := GetOrCreateProfile(ctx, pool, userID)
 	if err != nil {
-		return err
+		return SpinOutcome{}, err
 	}
 	cost := level.SpinsCost * lines
 	if profile.Spins < cost {
-		return errors.New("not enough spins — buy a pack in the shop")
+		return SpinOutcome{}, errors.New("not enough spins — buy a pack in the shop")
 	}
 
 	// Атомарное списание стоимости ВСЕХ линий — защита от двойного клика.
@@ -222,7 +230,7 @@ UPDATE slots_profiles SET spins = spins - $2
 WHERE user_id = $1 AND spins >= $2
 RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	if err != nil {
-		return errors.New("not enough spins — buy a pack in the shop")
+		return SpinOutcome{}, errors.New("not enough spins — buy a pack in the shop")
 	}
 
 	// spinsLeft/poolLeft — уже после списания; возвращаем cost, чтобы счётчик
@@ -234,6 +242,7 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	totalWin := 0.0
 	totalWagered := 0.0
 	wins := 0
+	diamonds := 0
 	bonusSpins := 0
 	streak := profile.CurrentStreak
 	bestStreak := profile.BestStreak
@@ -262,6 +271,9 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 
 		totalWagered += stake
 		totalWin += res.win
+		if res.reels[0] == "diamond" && res.reels[1] == "diamond" && res.reels[2] == "diamond" {
+			diamonds++
+		}
 		bonusSpins += eventBonus(res.event)
 		if res.win > 0 {
 			wins++
@@ -284,7 +296,7 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	// Суммарная выплата на кошелёк одной проводкой.
 	if totalWin > 0 {
 		if err := wallet_sql.AdjustBalance(ctx, pool, userID, totalWin); err != nil {
-			return err
+			return SpinOutcome{}, err
 		}
 	}
 
@@ -293,7 +305,7 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 		if _, err := pool.Exec(ctx, `
 UPDATE slots_profiles SET spins = spins + $2 WHERE user_id = $1;`,
 			userID, bonusSpins); err != nil {
-			return err
+			return SpinOutcome{}, err
 		}
 	}
 
@@ -305,7 +317,7 @@ UPDATE slots_profiles SET
 WHERE user_id = $1;`,
 		userID, poolRun, lines, wins, totalWin, totalWagered,
 		biggestWin, streak, bestStreak); err != nil {
-		return err
+		return SpinOutcome{}, err
 	}
 
 	// Дневная статистика: каждая линия считается за спин.
@@ -317,7 +329,7 @@ ON CONFLICT (user_id, day) DO UPDATE SET
     wins = slots_daily.wins + EXCLUDED.wins,
     winnings = slots_daily.winnings + EXCLUDED.winnings;`,
 		userID, lines, wins, totalWin); err != nil {
-		return err
+		return SpinOutcome{}, err
 	}
 
 	// По записи истории на каждую линию, в порядке строк машины сверху вниз
@@ -328,7 +340,7 @@ INSERT INTO slots_history (user_id, level_id, reels, win, event, lines)
 VALUES ($1, $2, $3, $4, $5, $6);`,
 			userID, level.ID, res.reels[0]+","+res.reels[1]+","+res.reels[2],
 			res.win, res.event, lines); err != nil {
-			return err
+			return SpinOutcome{}, err
 		}
 	}
 
@@ -340,5 +352,10 @@ WHERE user_id = $1
       WHERE user_id = $1 ORDER BY id DESC LIMIT $2
   );`, userID, HistoryKeepLimit)
 
-	return nil
+	return SpinOutcome{
+		Lines:        lines,
+		TotalWin:     totalWin,
+		TotalWagered: totalWagered,
+		Diamonds:     diamonds,
+	}, nil
 }

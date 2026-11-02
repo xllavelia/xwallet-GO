@@ -2,11 +2,14 @@ package empire_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/empire_sql"
 	"xwallet-server/users_sql"
 )
@@ -107,6 +110,17 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if err != nil {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
+		}
+
+		switch req.Action {
+		case "buy_object":
+			battlepass_sql.BPTrackEvent(ctx, pool, userID,
+				fmt.Sprintf("empire:build:%d:%d", userID, time.Now().UnixNano()),
+				"empire_buildings_built", 1)
+		case "upgrade_object":
+			battlepass_sql.BPTrackEvent(ctx, pool, userID,
+				fmt.Sprintf("empire:upgrade:%d:%d", userID, time.Now().UnixNano()),
+				"empire_upgrades", 1)
 		}
 
 		state, err := empire_sql.BuildState(ctx, pool, userID)

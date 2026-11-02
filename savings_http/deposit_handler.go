@@ -2,9 +2,12 @@ package savings_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/savings_sql"
 	"xwallet-server/users_sql"
 
@@ -46,6 +49,9 @@ func DepositHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not deposit", http.StatusInternalServerError)
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("savings:deposit:%d:%d", userID, time.Now().UnixNano()),
+			"savings_deposit_usd", req.Amount)
 		w.WriteHeader(http.StatusOK)
 	}
 }

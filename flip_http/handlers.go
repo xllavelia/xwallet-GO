@@ -3,9 +3,11 @@ package flip_http
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/flip_engine"
 	"xwallet-server/flip_sql"
 	"xwallet-server/users_sql"
@@ -172,6 +174,9 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
+
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("flip:bet:%d", bet.ID), "flip_rounds", 1)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

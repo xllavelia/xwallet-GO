@@ -8,6 +8,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/bankcards_sql"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/referral_sql"
@@ -195,6 +196,11 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		referral_sql.CreditReferrerIfAny(r.Context(), pool, userID, feesFromBalance, req.Amount)
+
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			"margin:open:"+created.TradeID, "margin_open_usd", 1)
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			"margin:volume:"+created.TradeID, "margin_volume_usd", req.Amount)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

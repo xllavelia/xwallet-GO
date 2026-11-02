@@ -121,6 +121,10 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if xpAwarded > 0 {
 			positions_sql.SetXpAwarded(r.Context(), pool, id, xpAwarded)
 		}
+		if pnl > 0 {
+			battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+				"margin:profit:"+pos.TradeID, "trade_profit_usd", pnl)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

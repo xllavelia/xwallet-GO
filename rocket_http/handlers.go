@@ -2,9 +2,12 @@ package rocket_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/rocket_engine"
 	"xwallet-server/rocket_sql"
 	"xwallet-server/users_sql"
@@ -114,7 +117,7 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		_, err = rocket_engine.PlaceBet(r.Context(), userID, req.Amount)
+		betID, err := rocket_engine.PlaceBet(r.Context(), userID, req.Amount)
 		if err != nil {
 			switch err {
 			case rocket_sql.ErrNotBettingPhase:
@@ -128,6 +131,8 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("rocket:bet:%d", betID), "rocket_rounds", 1)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -166,6 +171,10 @@ func CashoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
+
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("rocket:cashout:%d:%d", userID, time.Now().UnixNano()),
+			"rocket_cashout_x", multiplier)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cashoutResponse{Multiplier: multiplier, Payout: payout})

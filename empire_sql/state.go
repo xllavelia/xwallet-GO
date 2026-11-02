@@ -2,12 +2,14 @@ package empire_sql
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/wallet_sql"
 )
 
@@ -366,6 +368,7 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 		hours = bonuses.OfflineCapHours
 	}
 
+	var tickIncome float64
 	if hours > 0 {
 		rpBooster := boosterActive(boosters, "research_x2", now)
 		var totalGross, totalExpenses, rpGain, energyIncome float64
@@ -413,6 +416,7 @@ WHERE id = $4;`, o.LifetimeEarned, o.WorkerXP, o.Satisfaction, o.ID)
 			return err
 		}
 
+		tickIncome = totalGross + dividends
 		netTotal := totalGross - totalExpenses + dividends
 		if netTotal != 0 {
 			if err := wallet_sql.AdjustBalance(ctx, pool, userID, netTotal); err != nil {
@@ -473,7 +477,15 @@ WHERE user_id = $1 AND status = 'active' AND expires_at < $2;`, userID, now)
 	}
 
 	profile.LastTick = now
-	return saveProfile(ctx, pool, profile)
+	if err := saveProfile(ctx, pool, profile); err != nil {
+		return err
+	}
+	if tickIncome > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID,
+			fmt.Sprintf("empire:income:%d:%d", userID, now.UnixNano()),
+			"empire_income_usd", tickIncome)
+	}
+	return nil
 }
 
 // payDividends начисляет дивиденды по всем holding'ам, сам баланс

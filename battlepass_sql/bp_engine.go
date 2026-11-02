@@ -596,18 +596,18 @@ RETURNING id;
 func bpBackfillQuestTx(ctx context.Context, tx pgx.Tx, questID int64, userID int, seasonID int64, metric, mode string, start, end time.Time) error {
 	var query string
 	switch mode {
-	case "sum":
-		query = `SELECT COALESCE(SUM(amount), 0)::float8 FROM bp_events WHERE user_id=$1 AND season_id=$2 AND metric=$3 AND occurred_at >= $4 AND occurred_at < $5;`
 	case "max":
 		query = `SELECT COALESCE(MAX(amount), 0)::float8 FROM bp_events WHERE user_id=$1 AND season_id=$2 AND metric=$3 AND occurred_at >= $4 AND occurred_at < $5;`
 	default:
-		query = `SELECT COUNT(*)::float8 FROM bp_events WHERE user_id=$1 AND season_id=$2 AND metric=$3 AND occurred_at >= $4 AND occurred_at < $5;`
+		// count и sum: amount хранит количество единиц за событие,
+		// поэтому бэкфилл суммирует, как и живое обновление прогресса.
+		query = `SELECT COALESCE(SUM(amount), 0)::float8 FROM bp_events WHERE user_id=$1 AND season_id=$2 AND metric=$3 AND occurred_at >= $4 AND occurred_at < $5;`
 	}
 	var value float64
 	if err := tx.QueryRow(ctx, query, userID, seasonID, metric, start, end).Scan(&value); err != nil {
 		return err
 	}
-	if (mode == "sum" || mode == "max") && value < 0 {
+	if value < 0 {
 		value = 0
 	}
 	_, err := tx.Exec(ctx, `

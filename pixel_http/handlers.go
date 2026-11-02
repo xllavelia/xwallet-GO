@@ -2,9 +2,12 @@ package pixel_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/pixel_engine"
 	"xwallet-server/pixel_sql"
 	"xwallet-server/users_sql"
@@ -90,7 +93,7 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "invalid amount", http.StatusBadRequest)
 			return
 		}
-		_, err := pixel_engine.PlaceBet(r.Context(), userID, req.Amount)
+		boardID, err := pixel_engine.PlaceBet(r.Context(), userID, req.Amount)
 		if err != nil {
 			switch err {
 			case pixel_sql.ErrNotBettingPhase:
@@ -104,6 +107,8 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("pixel:bet:%d", boardID), "pixel_rounds", 1)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -143,6 +148,11 @@ func RevealHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				http.Error(w, "could not reveal cell", http.StatusInternalServerError)
 			}
 			return
+		}
+		if !result.IsMine {
+			battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+				fmt.Sprintf("pixel:safe:%d:%d", userID, time.Now().UnixNano()),
+				"pixel_safe_cells", 1)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{

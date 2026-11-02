@@ -2,9 +2,12 @@ package stocks_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/stockoracle"
 	"xwallet-server/stocks_sql"
 	"xwallet-server/users_sql"
@@ -233,6 +236,9 @@ func BuyHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not complete purchase", http.StatusInternalServerError)
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("stocks:buy:%d:%d", userID, time.Now().UnixNano()),
+			"market_volume_usd", req.UsdAmount)
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(buyResponse{Quantity: quantity, Price: quote.Price})
@@ -274,6 +280,11 @@ func SellHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			http.Error(w, "could not complete sale", http.StatusInternalServerError)
 			return
+		}
+		key := fmt.Sprintf("stocks:sell:%d:%d", userID, time.Now().UnixNano())
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID, key+":volume", "market_volume_usd", req.UsdAmount)
+		if realizedPnl > 0 {
+			battlepass_sql.BPTrackEvent(r.Context(), pool, userID, key+":profit", "trade_profit_usd", realizedPnl)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

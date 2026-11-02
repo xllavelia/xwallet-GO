@@ -2,6 +2,7 @@ package transfer_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"xwallet-server/auth_http"
@@ -89,6 +90,8 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if xpAwarded > 0 {
 			transfer_sql.SetXpAwarded(r.Context(), pool, transferID, xpAwarded)
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, senderID,
+			fmt.Sprintf("transfer:%d", transferID), "transfer_sent_usd", req.Amount)
 
 		detail, err := transfer_sql.GetTransferDetail(r.Context(), pool, transferID, senderID)
 		if err != nil {

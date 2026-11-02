@@ -8,6 +8,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/bankcards_sql"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/users_sql"
 
@@ -123,6 +124,11 @@ func OpenTimeTradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not finalize trade", http.StatusInternalServerError)
 			return
 		}
+
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			"timed:open:"+created.TradeID, "timed_open_usd", 1)
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			"timed:volume:"+created.TradeID, "timed_volume_usd", req.Amount)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

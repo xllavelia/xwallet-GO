@@ -2,11 +2,14 @@ package rewards_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/rewards_sql"
 	"xwallet-server/users_sql"
 )
@@ -67,6 +70,9 @@ func ClaimHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			writeJSONError(w, err.Error(), status)
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("daily:claim:%s:%d:%s", result.Track, result.Day, time.Now().UTC().Format("2006-01-02")),
+			"daily_rewards_claimed", 1)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}

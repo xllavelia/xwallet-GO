@@ -2,11 +2,13 @@ package ticket_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/ticket_sql"
 	"xwallet-server/users_sql"
 )
@@ -103,6 +105,8 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 			return
 		}
+		battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+			fmt.Sprintf("ticket:open:%d", result.TicketID), "tickets_opened", 1)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}

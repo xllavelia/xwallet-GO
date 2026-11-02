@@ -2,11 +2,14 @@ package slots_http
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xwallet-server/auth_http"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/slots_sql"
 	"xwallet-server/users_sql"
 )
@@ -87,9 +90,10 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		var err error
+		var spin slots_sql.SpinOutcome
 		switch req.Action {
 		case "spin":
-			err = slots_sql.ActionSpin(r.Context(), pool, userID, req.LevelID, req.Lines)
+			spin, err = slots_sql.ActionSpin(r.Context(), pool, userID, req.LevelID, req.Lines)
 		case "buy_pack":
 			err = slots_sql.ActionBuyPack(r.Context(), pool, userID, req.PackID)
 		default:
@@ -99,6 +103,20 @@ func ActionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if err != nil {
 			writeError(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+
+		if req.Action == "spin" {
+			key := fmt.Sprintf("slots:%d:%d", userID, time.Now().UnixNano())
+			battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+				key+":spins", "slots_spins", float64(spin.Lines))
+			if profit := spin.TotalWin - spin.TotalWagered; profit > 0 {
+				battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+					key+":profit", "slots_profit_usd", profit)
+			}
+			if spin.Diamonds > 0 {
+				battlepass_sql.BPTrackEvent(r.Context(), pool, userID,
+					key+":diamonds", "slots_diamonds", float64(spin.Diamonds))
+			}
 		}
 
 		state, err := slots_sql.BuildState(r.Context(), pool, userID)

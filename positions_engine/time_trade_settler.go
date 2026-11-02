@@ -121,4 +121,8 @@ func settleOne(pool *pgxpool.Pool, id int) {
 	if xp > 0 {
 		positions_sql.SetXpAwarded(ctx, pool, id, xp)
 	}
+	if pnl > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, pos.UserID,
+			"timed:profit:"+pos.TradeID, "trade_profit_usd", pnl)
+	}
 }

@@ -2,10 +2,13 @@ package mining_sql
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"xwallet-server/battlepass_sql"
 )
 
 // ===================== ВНУТРЕННИЕ МОДЕЛИ =====================
@@ -279,7 +282,15 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 	}
 
 	_ = dtHours
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	if totalEarned > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID,
+			fmt.Sprintf("mining:income:%d:%d", userID, time.Now().UnixNano()),
+			"mining_income_usd", totalEarned)
+	}
+	return nil
 }
 
 // ===================== DTO =====================

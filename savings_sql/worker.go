@@ -2,10 +2,13 @@ package savings_sql
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"xwallet-server/battlepass_sql"
 )
 
 func StartInterestWorker(pool *pgxpool.Pool) {
@@ -74,6 +77,9 @@ func runAccrualPass(pool *pgxpool.Pool) {
 			log.Println("savings worker: commit failed for user", acc.userID, err)
 		} else {
 			log.Println("savings worker: accrued", interest, "for user", acc.userID)
+			battlepass_sql.BPTrackEvent(ctx, pool, acc.userID,
+				fmt.Sprintf("savings:interest:%d:%d", acc.userID, time.Now().UnixNano()),
+				"savings_interest_usd", interest)
 		}
 	}
 }

@@ -3,8 +3,10 @@ package mining_sql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5"
@@ -73,7 +75,13 @@ func BuyServer(ctx context.Context, pool *pgxpool.Pool, userID int, catalogID st
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	key := fmt.Sprintf("mining:buy:%s:%d", catalogID, time.Now().UnixNano())
+	battlepass_sql.BPTrackEvent(ctx, pool, userID, key+":count", "mining_servers_bought", 1)
+	battlepass_sql.BPTrackEvent(ctx, pool, userID, key+":power", "mining_power_gained", def.Power)
+	return nil
 }
 
 // ===================== РАЗБУДИТЬ СЕРВЕР =====================
@@ -210,7 +218,16 @@ func UpgradeServer(ctx context.Context, pool *pgxpool.Pool, userID int, serverID
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	powerGain := def.Power * (RankTiers[rank].PowerMult - RankTiers[rank-1].PowerMult)
+	key := fmt.Sprintf("mining:upgrade:%d:%d", serverID, time.Now().UnixNano())
+	battlepass_sql.BPTrackEvent(ctx, pool, userID, key+":count", "mining_upgrades", 1)
+	if powerGain > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID, key+":power", "mining_power_gained", powerGain)
+	}
+	return nil
 }
 
 // ===================== ПОКУПКА ПРЕДМЕТОВ =====================

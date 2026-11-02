@@ -3,6 +3,7 @@ package flip_sql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"xwallet-server/bankcards_sql"
+	"xwallet-server/battlepass_sql"
 )
 
 const ChoiceRed = "red"
@@ -358,7 +360,36 @@ func ResolveRound(ctx context.Context, pool *pgxpool.Pool, roundID int, outcome 
 		return err
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	trackFlipStreaks(ctx, pool, bets, outcome)
+	return nil
+}
+
+func trackFlipStreaks(ctx context.Context, pool *pgxpool.Pool, bets []Bet, outcome string) {
+	for _, bet := range bets {
+		if bet.Choice != outcome {
+			continue
+		}
+		var streak int
+		err := pool.QueryRow(ctx, `
+WITH ordered AS (
+	SELECT status, ROW_NUMBER() OVER (ORDER BY round_id DESC, id DESC) AS rn
+	FROM flip_bets
+	WHERE user_id = $1 AND status IN ('won', 'lost')
+),
+first_loss AS (
+	SELECT COALESCE(MIN(rn), 2147483647) AS rn FROM ordered WHERE status = 'lost'
+)
+SELECT COUNT(*) FROM ordered, first_loss
+WHERE ordered.status = 'won' AND ordered.rn < first_loss.rn;
+`, bet.UserID).Scan(&streak)
+		if err == nil && streak > 0 {
+			battlepass_sql.BPTrackEvent(ctx, pool, bet.UserID,
+				fmt.Sprintf("flip:streak:%d", bet.ID), "flip_color_streak", float64(streak))
+		}
+	}
 }
 
 func FinishRound(ctx context.Context, pool *pgxpool.Pool, roundID int) error {
