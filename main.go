@@ -29,8 +29,7 @@ import (
 	"xwallet-server/home_http"
 	"xwallet-server/mining_http"
 	"xwallet-server/mining_sql"
-	"xwallet-server/open_city_http"
-	"xwallet-server/open_city_sql"
+
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
 	"xwallet-server/pixel_engine"
@@ -167,6 +166,12 @@ func main() {
 	if err := battlepass_sql.MigrateXpAwardedColumns(ctx, pool); err != nil {
 		log.Fatal("xp_awarded columns migration: ", err)
 	}
+	if err := battlepass_sql.BPMigrateV2(ctx, pool); err != nil {
+		log.Fatal("battlepass v2 schema migration: ", err)
+	}
+	if _, err := battlepass_sql.BPEnsureSeason(ctx, pool); err != nil {
+		log.Fatal("battlepass season: ", err)
+	}
 	if err := user_vouchers_sql.MigrateTimedVoucherTypes(ctx, pool); err != nil {
 		log.Fatal("timed voucher types migration: ", err)
 	}
@@ -230,9 +235,7 @@ func main() {
 	if err := slots_sql.MigrateSlotsSchema(ctx, pool); err != nil {
 		log.Fatal("slots migrate: ", err)
 	}
-	if err := open_city_sql.MigrateOpenCitySchema(ctx, pool); err != nil {
-		log.Fatalf("open city migrate: %v", err)
-	}
+
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -279,11 +282,12 @@ func main() {
 	http.HandleFunc("/promo/redeem", auth_http.WithCORS(auth_http.RequireAuth(promo_http.RedeemHandler(pool))))
 	http.HandleFunc("/prime", auth_http.WithCORS(auth_http.RequireAuth(prime_http.GetPrimeStatusHandler(pool))))
 	http.HandleFunc("/prime/purchase", auth_http.WithCORS(auth_http.RequireAuth(prime_http.PurchaseHandler(pool))))
-	http.HandleFunc("/battlepass", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.GetBattlePassHandler(pool))))
-	http.HandleFunc("/battlepass/claim", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.ClaimLevelHandler(pool))))
-	http.HandleFunc("/battlepass/open-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.OpenCaseHandler(pool))))
-	http.HandleFunc("/battlepass/dev-add-xp", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddXpHandler(pool))))
-	http.HandleFunc("/battlepass/dev-add-case", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.DevAddCaseHandler(pool))))
+	http.HandleFunc("/battlepass", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPStateHandler(pool))))
+	http.HandleFunc("/battlepass/pass", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPPurchaseHandler(pool))))
+	http.HandleFunc("/battlepass/claim", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPClaimHandler(pool))))
+	http.HandleFunc("/battlepass/quests", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPQuestsHandler(pool))))
+	http.HandleFunc("/battlepass/quests/claim", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPQuestClaimHandler(pool))))
+	http.HandleFunc("/battlepass/case/open", auth_http.WithCORS(auth_http.RequireAuth(battlepass_http.BPCaseOpenHandler(pool))))
 	http.HandleFunc("/auth/change-password", auth_http.WithCORS(auth_http.RequireAuth(auth_http.ChangePasswordHandler(pool))))
 	http.HandleFunc("/auth/update-username", auth_http.WithCORS(auth_http.RequireAuth(auth_http.UpdateUsernameHandler(pool))))
 	http.HandleFunc("/admin/stats", auth_http.WithCORS(auth_http.RequireAuth(auth_http.RequireAdmin(admin_http.GetStatsHandler(pool)))))
@@ -361,9 +365,6 @@ func main() {
 	http.HandleFunc("/empire/action", auth_http.WithCORS(auth_http.RequireAuth(empire_http.ActionHandler(pool))))
 	http.HandleFunc("/slots/state", auth_http.WithCORS(auth_http.RequireAuth(slots_http.StateHandler(pool))))
 	http.HandleFunc("/slots/action", auth_http.WithCORS(auth_http.RequireAuth(slots_http.ActionHandler(pool))))
-	http.HandleFunc("/opencity/state", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.StateHandler(pool))))
-	http.HandleFunc("/opencity/action", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.ActionHandler(pool))))
-	http.HandleFunc("/opencity/dict", auth_http.WithCORS(auth_http.RequireAuth(open_city_http.DictHandler(pool))))
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})

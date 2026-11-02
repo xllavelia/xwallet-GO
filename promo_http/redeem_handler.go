@@ -10,6 +10,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/bankcards_sql"
+	"xwallet-server/battlepass_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_sql"
@@ -69,7 +70,7 @@ func RedeemHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 func handleReferralRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, code string, userID int) {
-	referrerName, err := referral_sql.RedeemReferralCode(r.Context(), pool, code, userID)
+	referrerID, referrerName, err := referral_sql.RedeemReferralCode(r.Context(), pool, code, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, referral_sql.ErrReferralCodeNotFound):
@@ -83,7 +84,8 @@ func handleReferralRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.
 		}
 		return
 	}
-
+	battlepass_sql.BPTrackEvent(r.Context(), pool, referrerID,
+		fmt.Sprintf("referral:%d", userID), "referrals_joined", 1)
 	writeSuccess(w, "referral", "Referral applied! @"+referrerName+" earned +25 XP")
 }
 

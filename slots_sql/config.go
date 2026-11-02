@@ -100,9 +100,9 @@ type SlotsPack struct {
 }
 
 var SlotsPacks = []SlotsPack{
-	{ID: "starter", Name: "Starter", Spins: 20, Price: 5.0},
-	{ID: "medium", Name: "Medium", Spins: 55, Price: 15.0},
-	{ID: "large", Name: "Large", Spins: 120, Price: 30.0},
+	{ID: "starter", Name: "Starter", Spins: 20, Price: 20.0},
+	{ID: "medium", Name: "Medium", Spins: 55, Price: 60.0},
+	{ID: "large", Name: "Large", Spins: 120, Price: 120.0},
 }
 
 // ---------- Редкие события ----------
