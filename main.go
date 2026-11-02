@@ -389,6 +389,7 @@ func main() {
 	positions_http.StartLiquidationWorker(pool)
 	savings_sql.StartInterestWorker(pool)
 	p2p_sql.SeedOfficialListings(ctx, pool)
+
 	log.Println("Auth server running on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
