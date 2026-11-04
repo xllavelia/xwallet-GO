@@ -59,7 +59,7 @@ func writeCardError(w http.ResponseWriter, err error, fallback string) {
 	switch {
 	case errors.Is(err, bankcards_sql.ErrInvalidName), errors.Is(err, bankcards_sql.ErrInvalidDesign), errors.Is(err, bankcards_sql.ErrInvalidAmount):
 		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrDesignAlreadyOwned), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
+	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, bankcards_sql.ErrCardNotFound):
 		writeError(w, http.StatusNotFound, err.Error())

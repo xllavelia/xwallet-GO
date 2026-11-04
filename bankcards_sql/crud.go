@@ -14,9 +14,8 @@ import (
 )
 
 var ErrMaxCardsReached = errors.New("maximum of 5 accounts reached")
-var ErrDesignAlreadyOwned = errors.New("you already have an account with this design")
 var ErrInvalidName = errors.New("name must contain 1 to 32 characters and no control characters")
-var ErrInvalidDesign = errors.New("designId must be between 5 and 9")
+var ErrInvalidDesign = errors.New("designId must be between 0 and 4")
 var ErrInvalidAmount = errors.New("amount must be finite, positive, and in whole cents")
 var ErrCardNotFound = errors.New("card not found")
 var ErrCardFunded = errors.New("cannot close an account with a nonzero balance")
@@ -35,7 +34,7 @@ func ValidateOpenCard(name string, designID int) (string, error) {
 	if n := utf8.RuneCountInString(name); n < 1 || n > 32 {
 		return "", ErrInvalidName
 	}
-	if designID < 5 || designID > 9 {
+	if designID < 0 || designID > 4 {
 		return "", ErrInvalidDesign
 	}
 	return name, nil
@@ -114,18 +113,11 @@ func openCardTx(ctx context.Context, tx pgx.Tx, userID int, name string, designI
 		return Card{}, err
 	}
 	var count int
-	var designUsed bool
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE(BOOL_OR(design_id = $2), false)
-		FROM bank_cards WHERE user_id = $1;
-	`, userID, designID).Scan(&count, &designUsed); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM bank_cards WHERE user_id = $1;`, userID).Scan(&count); err != nil {
 		return Card{}, err
 	}
 	if count >= MaxCardsPerUser {
 		return Card{}, ErrMaxCardsReached
-	}
-	if designUsed {
-		return Card{}, ErrDesignAlreadyOwned
 	}
 
 	for attempt := 0; attempt < 20; attempt++ {
