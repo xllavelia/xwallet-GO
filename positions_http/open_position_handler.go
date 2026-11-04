@@ -112,16 +112,7 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "could not resolve funding source", http.StatusInternalServerError)
 			return
 		}
-		var cardTier string
-		var feeFullyWaived bool
-		if fundingSource.Kind == "card" {
-			cardTier, _ = bankcards_sql.GetCardTier(r.Context(), pool, fundingSource.CardID)
-			if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
-				feeRate -= cfg.FeeReductionPoints / 10
-				feeFullyWaived = cfg.FeeFullyWaived
-			}
-		}
-		if feeRate < 0 || feeFullyWaived {
+		if feeRate < 0 {
 			feeRate = 0
 		}
 

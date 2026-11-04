@@ -9,7 +9,6 @@ import (
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/priceoracle"
-	"xwallet-server/prime_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,32 +71,17 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 			fundingSource = bankcards_sql.FundingSource{Kind: "card", CardID: *p.FundingCardID}
 		}
 
-		cashback := 0.0
-		if pnl > 0 && fundingSource.Kind == "card" {
-			if cardTier, tierErr := bankcards_sql.GetCardTier(ctx, pool, fundingSource.CardID); tierErr == nil {
-				if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
-					rate := cfg.CashbackPercent
-					if cardTier == "saint" {
-						if primeSub, _ := prime_sql.GetActiveSubscription(ctx, pool, p.UserID); primeSub != nil {
-							rate = cfg.CashbackPercentPrime
-						}
-					}
-					cashback = pnl * (rate / 100)
-				}
-			}
-		}
-
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			continue
 		}
 
-		if err := positions_sql.ClosePositionTx(ctx, tx, p.ID, closePrice, pnl, pnlPercent, result, cashback); err != nil {
+		if err := positions_sql.ClosePositionTx(ctx, tx, p.ID, closePrice, pnl, pnlPercent, result, 0); err != nil {
 			tx.Rollback(ctx)
 			log.Println("liquidation worker: close failed for", p.ID, err)
 			continue
 		}
-		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, p.Margin+pnl+cashback); err != nil {
+		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, p.Margin+pnl); err != nil {
 			tx.Rollback(ctx)
 			log.Println("liquidation worker: payout failed for", p.ID, err)
 			continue
@@ -107,7 +91,7 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 			continue
 		}
 
-		xp := battlepass_sql.AwardTradeXP(ctx, pool, p.UserID, pnl, fundingSource)
+		xp := battlepass_sql.AwardTradeXP(ctx, pool, p.UserID, pnl)
 		if xp > 0 {
 			positions_sql.SetXpAwarded(ctx, pool, p.ID, xp)
 		}

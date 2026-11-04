@@ -9,7 +9,6 @@ import (
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
 	"xwallet-server/priceoracle"
-	"xwallet-server/prime_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -81,33 +80,18 @@ func settleOne(pool *pgxpool.Pool, id int) {
 		fundingSource = bankcards_sql.FundingSource{Kind: "card", CardID: *pos.FundingCardID}
 	}
 
-	cashback := 0.0
-	if isWin && fundingSource.Kind == "card" {
-		if cardTier, tierErr := bankcards_sql.GetCardTier(ctx, pool, fundingSource.CardID); tierErr == nil {
-			if cfg, ok := bankcards_sql.Tiers[cardTier]; ok {
-				rate := cfg.CashbackPercent
-				if cardTier == "saint" {
-					if primeSub, _ := prime_sql.GetActiveSubscription(ctx, pool, pos.UserID); primeSub != nil {
-						rate = cfg.CashbackPercentPrime
-					}
-				}
-				cashback = pnl * (rate / 100)
-			}
-		}
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return
 	}
 	defer tx.Rollback(ctx)
 
-	if err := positions_sql.ClosePositionTx(ctx, tx, id, currentPrice, pnl, pnlPercent, result, cashback); err != nil {
+	if err := positions_sql.ClosePositionTx(ctx, tx, id, currentPrice, pnl, pnlPercent, result, 0); err != nil {
 		log.Println("time trade settle: close failed for", id, err)
 		return
 	}
-	if payoutTotal+cashback > 0 {
-		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, payoutTotal+cashback); err != nil {
+	if payoutTotal > 0 {
+		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, payoutTotal); err != nil {
 			log.Println("time trade settle: payout failed for", id, err)
 			return
 		}
@@ -117,7 +101,7 @@ func settleOne(pool *pgxpool.Pool, id int) {
 		return
 	}
 
-	xp := battlepass_sql.AwardTradeXP(ctx, pool, pos.UserID, pnl, fundingSource)
+	xp := battlepass_sql.AwardTradeXP(ctx, pool, pos.UserID, pnl)
 	if xp > 0 {
 		positions_sql.SetXpAwarded(ctx, pool, id, xp)
 	}

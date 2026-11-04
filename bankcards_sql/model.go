@@ -6,6 +6,8 @@ type Card struct {
 	ID                 int
 	UserID             int
 	Tier               string
+	Name               string
+	DesignID           int
 	CardNumber         string
 	Balance            float64
 	IsActiveForTrading bool

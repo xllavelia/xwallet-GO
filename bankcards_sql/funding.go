@@ -3,6 +3,7 @@ package bankcards_sql
 import (
 	"context"
 	"errors"
+	"math"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,13 +28,13 @@ func ResolveFundingSource(ctx context.Context, q Queryer, userID int) (FundingSo
 	return FundingSource{Kind: "card", CardID: cardID, UserID: userID}, nil
 }
 
-func GetCardTier(ctx context.Context, q Queryer, cardID int) (string, error) {
-	var tier string
-	err := q.QueryRow(ctx, `SELECT tier FROM bank_cards WHERE id = $1;`, cardID).Scan(&tier)
-	return tier, err
-}
+var ErrFundingSourceNotFound = errors.New("funding account not found")
+var ErrInvalidFundingDelta = errors.New("funding balance adjustment must be finite")
 
 func AdjustFundingBalance(ctx context.Context, q Queryer, source FundingSource, delta float64) error {
+	if math.IsNaN(delta) || math.IsInf(delta, 0) {
+		return ErrInvalidFundingDelta
+	}
 	var table, whereCol string
 	var whereVal interface{}
 	if source.Kind == "card" {
@@ -48,8 +49,14 @@ func AdjustFundingBalance(ctx context.Context, q Queryer, source FundingSource, 
 
 	if delta >= 0 {
 		sqlQuery := "UPDATE " + table + " SET balance = balance + $1 WHERE " + whereCol + " = $2;"
-		_, err := q.Exec(ctx, sqlQuery, delta, whereVal)
-		return err
+		tag, err := q.Exec(ctx, sqlQuery, delta, whereVal)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return ErrFundingSourceNotFound
+		}
+		return nil
 	}
 
 	var newBal float64
@@ -75,17 +82,5 @@ func GetFundingBalance(ctx context.Context, q Queryer, source FundingSource) (fl
 }
 
 func ResolveAnyCard(ctx context.Context, q Queryer, userID int) (FundingSource, error) {
-	var cardID int
-	err := q.QueryRow(ctx, `
-		SELECT id FROM bank_cards WHERE user_id = $1
-		ORDER BY is_active_for_trading DESC, opened_at DESC
-		LIMIT 1;
-	`, userID).Scan(&cardID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return FundingSource{Kind: "wallet", UserID: userID}, nil
-		}
-		return FundingSource{}, err
-	}
-	return FundingSource{Kind: "card", CardID: cardID, UserID: userID}, nil
+	return ResolveFundingSource(ctx, q, userID)
 }

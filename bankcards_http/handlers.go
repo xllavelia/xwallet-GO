@@ -2,7 +2,10 @@ package bankcards_http
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"time"
 
 	"xwallet-server/auth_http"
 	"xwallet-server/bankcards_sql"
@@ -11,149 +14,130 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type tierResponse struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	OpenPriceUsd         float64 `json:"openPriceUsd"`
-	CashbackPercent      float64 `json:"cashbackPercent"`
-	CashbackPercentPrime float64 `json:"cashbackPercentPrime"`
-	FeeReductionPoints   float64 `json:"feeReductionPoints"`
-	FeeFullyWaived       bool    `json:"feeFullyWaived"`
-	LavxPerMonth         float64 `json:"lavxPerMonth"`
-	XpBonusPercent       float64 `json:"xpBonusPercent"`
-	TransferFeePercent   float64 `json:"transferFeePercent"`
-	PatternSeed          string  `json:"patternSeed"`
-}
-
 type cardResponse struct {
 	ID                 int     `json:"id"`
-	Tier               string  `json:"tier"`
-	PatternSeed        string  `json:"patternSeed"`
+	Name               string  `json:"name"`
+	DesignID           int     `json:"designId"`
 	CardNumber         string  `json:"cardNumber"`
 	Balance            float64 `json:"balance"`
 	IsActiveForTrading bool    `json:"isActiveForTrading"`
 	OpenedAt           string  `json:"openedAt"`
-	CashbackThisMonth  float64 `json:"cashbackThisMonth"`
 }
 
 type listResponse struct {
-	Cards                  []cardResponse `json:"cards"`
-	Catalog                []tierResponse `json:"catalog"`
-	MaxCards               int            `json:"maxCards"`
-	TotalCashbackThisMonth float64        `json:"totalCashbackThisMonth"`
+	Cards    []cardResponse `json:"cards"`
+	MaxCards int            `json:"maxCards"`
+}
+
+func responseCard(c bankcards_sql.Card) cardResponse {
+	return cardResponse{
+		ID: c.ID, Name: c.Name, DesignID: c.DesignID, CardNumber: c.CardNumber,
+		Balance: c.Balance, IsActiveForTrading: c.IsActiveForTrading,
+		OpenedAt: c.OpenedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func decodeRequest(w http.ResponseWriter, r *http.Request, dst interface{}) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(interface{})); err != io.EOF {
+		return errors.New("request must contain one JSON object")
+	}
+	return nil
+}
+
+func writeCardError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, bankcards_sql.ErrInvalidName), errors.Is(err, bankcards_sql.ErrInvalidDesign), errors.Is(err, bankcards_sql.ErrInvalidAmount):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrDesignAlreadyOwned), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, bankcards_sql.ErrCardNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, bankcards_sql.ErrInsufficientFunds):
+		writeError(w, http.StatusPaymentRequired, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, fallback)
+	}
 }
 
 func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
 		cards, err := bankcards_sql.ListCards(r.Context(), pool, userID)
 		if err != nil {
-			http.Error(w, "could not load cards", http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "could not load cards")
 			return
 		}
-
-		cashbackByCard := map[int]float64{}
-		var totalCashback float64
-		rows, err := pool.Query(r.Context(), `
-			SELECT funding_card_id, COALESCE(SUM(cashback_awarded),0)
-			FROM positions
-			WHERE user_id = $1 AND status = 'closed' AND funding_kind = 'card'
-			  AND funding_card_id IS NOT NULL AND closed_at >= date_trunc('month', now())
-			GROUP BY funding_card_id;
-		`, userID)
-		if err == nil {
-			for rows.Next() {
-				var cid int
-				var amt float64
-				rows.Scan(&cid, &amt)
-				cashbackByCard[cid] = amt
-				totalCashback += amt
-			}
-			rows.Close()
-		}
-
 		items := make([]cardResponse, 0, len(cards))
 		for _, c := range cards {
-			items = append(items, cardResponse{
-				ID: c.ID, Tier: c.Tier, CardNumber: c.CardNumber, Balance: c.Balance,
-				IsActiveForTrading: c.IsActiveForTrading, OpenedAt: c.OpenedAt.Format("2006-01-02T15:04:05Z"),
-				CashbackThisMonth: cashbackByCard[c.ID],
-			})
+			items = append(items, responseCard(c))
 		}
-
-		catalog := make([]tierResponse, 0, len(bankcards_sql.TierOrder))
-		for _, id := range bankcards_sql.TierOrder {
-			cfg := bankcards_sql.Tiers[id]
-			catalog = append(catalog, tierResponse{
-				ID: cfg.ID, Name: cfg.Name, OpenPriceUsd: cfg.OpenPriceUsd,
-				CashbackPercent: cfg.CashbackPercent, CashbackPercentPrime: cfg.CashbackPercentPrime,
-				FeeReductionPoints: cfg.FeeReductionPoints, FeeFullyWaived: cfg.FeeFullyWaived,
-				LavxPerMonth: cfg.LavxPerMonth, XpBonusPercent: cfg.XpBonusPercent, PatternSeed: cfg.PatternSeed,
-				TransferFeePercent: cfg.TransferFeePercent,
-			})
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(listResponse{
-			Cards: items, Catalog: catalog, MaxCards: bankcards_sql.MaxCardsPerUser,
-			TotalCashbackThisMonth: totalCashback,
-		})
+		json.NewEncoder(w).Encode(listResponse{Cards: items, MaxCards: bankcards_sql.MaxCardsPerUser})
 	}
 }
 
 type openRequest struct {
-	Tier string `json:"tier"`
+	Name     string `json:"name"`
+	DesignID int    `json:"designId"`
 }
 
 func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		var req openRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+		if err := decodeRequest(w, r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		name, err := bankcards_sql.ValidateOpenCard(req.Name, req.DesignID)
+		if err != nil {
+			writeCardError(w, err, "invalid account")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		card, err := bankcards_sql.OpenCard(r.Context(), pool, userID, req.Tier)
+		card, err := bankcards_sql.OpenCard(r.Context(), pool, userID, name, req.DesignID)
 		if err != nil {
-			switch err {
-			case bankcards_sql.ErrTierNotFound:
-				http.Error(w, "invalid tier", http.StatusBadRequest)
-			case bankcards_sql.ErrTierAlreadyOwned:
-				http.Error(w, "you already own this card tier", http.StatusConflict)
-			case bankcards_sql.ErrInsufficientWalletBalance:
-				http.Error(w, "insufficient wallet balance", http.StatusPaymentRequired)
-			default:
-				http.Error(w, "could not open card", http.StatusInternalServerError)
-			}
+			writeCardError(w, err, "could not open card")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(cardResponse{
-			ID: card.ID, Tier: card.Tier, CardNumber: card.CardNumber, Balance: card.Balance,
-			IsActiveForTrading: card.IsActiveForTrading, OpenedAt: card.OpenedAt.Format("2006-01-02T15:04:05Z"),
-		})
+		json.NewEncoder(w).Encode(responseCard(card))
 	}
 }
 
@@ -165,31 +149,30 @@ type cardIDAmountRequest struct {
 func TopUpHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		var req cardIDAmountRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Amount <= 0 {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+		if err := decodeRequest(w, r, &req); err != nil || req.CardID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		if err := bankcards_sql.ValidateCardAmount(req.Amount); err != nil {
+			writeCardError(w, err, "invalid amount")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		err = bankcards_sql.TopUpCard(r.Context(), pool, userID, req.CardID, req.Amount)
-		if err != nil {
-			if err == bankcards_sql.ErrInsufficientFunds {
-				http.Error(w, "insufficient wallet balance", http.StatusPaymentRequired)
-				return
-			}
-			http.Error(w, "could not top up card", http.StatusInternalServerError)
+		if err := bankcards_sql.TopUpCard(r.Context(), pool, userID, req.CardID, req.Amount); err != nil {
+			writeCardError(w, err, "could not top up card")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -203,26 +186,26 @@ type cardIDRequest struct {
 func SelectActiveHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		var req cardIDRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+		if err := decodeRequest(w, r, &req); err != nil || req.CardID < 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
 		if err := bankcards_sql.SelectActiveCard(r.Context(), pool, userID, req.CardID); err != nil {
-			http.Error(w, "could not select card", http.StatusInternalServerError)
+			writeCardError(w, err, "could not select card")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -231,23 +214,27 @@ func SelectActiveHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 func CloseHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		var req cardIDRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+		if err := decodeRequest(w, r, &req); err != nil || req.CardID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
 		if err := bankcards_sql.CloseCard(r.Context(), pool, userID, req.CardID); err != nil {
-			http.Error(w, "could not close card", http.StatusInternalServerError)
+			writeCardError(w, err, "could not close card")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -258,17 +245,17 @@ func ResolveHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		number := r.URL.Query().Get("number")
 		if len(number) != 16 {
-			http.Error(w, "invalid card number", http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "invalid card number")
 			return
 		}
 		_, username, err := bankcards_sql.ResolveByCardNumber(r.Context(), pool, number)
 		if err != nil {
-			http.Error(w, "card not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "card not found")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -288,7 +275,7 @@ func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		prefix := r.URL.Query().Get("q")
@@ -299,12 +286,12 @@ func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
 		results, err := bankcards_sql.SearchCardsByPrefix(r.Context(), pool, prefix, userID)
 		if err != nil {
-			http.Error(w, "search failed", http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "search failed")
 			return
 		}
 		items := make([]cardSearchItem, 0, len(results))
@@ -320,31 +307,30 @@ func SearchHandler(pool *pgxpool.Pool) http.HandlerFunc {
 func WithdrawHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 		authUser, ok := auth_http.UserFromContext(r)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		var req cardIDAmountRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Amount <= 0 {
-			http.Error(w, "invalid request", http.StatusBadRequest)
+		if err := decodeRequest(w, r, &req); err != nil || req.CardID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		if err := bankcards_sql.ValidateCardAmount(req.Amount); err != nil {
+			writeCardError(w, err, "invalid amount")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
-			http.Error(w, "user not found", http.StatusNotFound)
+			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		err = bankcards_sql.WithdrawFromCard(r.Context(), pool, userID, req.CardID, req.Amount)
-		if err != nil {
-			if err == bankcards_sql.ErrInsufficientFunds {
-				http.Error(w, "insufficient card balance", http.StatusPaymentRequired)
-				return
-			}
-			http.Error(w, "could not withdraw from card", http.StatusInternalServerError)
+		if err := bankcards_sql.WithdrawFromCard(r.Context(), pool, userID, req.CardID, req.Amount); err != nil {
+			writeCardError(w, err, "could not withdraw from card")
 			return
 		}
 		w.WriteHeader(http.StatusOK)

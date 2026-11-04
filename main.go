@@ -385,7 +385,6 @@ func main() {
 	rocket_engine.Start(pool)
 	stockoracle.Start()
 	priceoracle.Start()
-	bankcards_sql.StartLavxWorker(pool)
 	positions_http.StartLiquidationWorker(pool)
 	savings_sql.StartInterestWorker(pool)
 	p2p_sql.SeedOfficialListings(ctx, pool)

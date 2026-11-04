@@ -5,20 +5,17 @@ import (
 	"log"
 	"time"
 
-	"xwallet-server/bankcards_sql"
 	"xwallet-server/user_vouchers_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// applyBoostAndAdd начисляет XP с учетом активного XP-бустера
-// и дополнительного бонуса, например от банковской карты.
+// applyBoostAndAdd awards base XP with the active voucher XP boost only.
 func applyBoostAndAdd(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	userID int,
 	baseXP int,
-	extraPercent float64,
 ) int {
 	if baseXP <= 0 {
 		return 0
@@ -29,8 +26,7 @@ func applyBoostAndAdd(
 		boostPercent = 0
 	}
 
-	totalPercent := boostPercent + extraPercent
-	finalXP := int(float64(baseXP) * (1 + totalPercent/100))
+	finalXP := int(float64(baseXP) * (1 + boostPercent/100))
 
 	if finalXP <= 0 {
 		return 0
@@ -52,68 +48,38 @@ func applyBoostAndAdd(
 	return finalXP
 }
 
-// AwardTradeXP начисляет XP за совершенную сделку.
-// XP зависит от прибыли/убытка и может дополнительно увеличиваться
-// за счет бонуса банковской карты и активного XP-бустера.
-func AwardTradeXP(
-	ctx context.Context,
-	pool *pgxpool.Pool,
-	userID int,
-	pnl float64,
-	source bankcards_sql.FundingSource,
-) int {
-	var baseXP int
-
+func tradeBaseXP(pnl float64) int {
 	if pnl > 0 {
 		switch {
 		case pnl >= 100:
-			baseXP = 300
+			return 300
 		case pnl >= 10:
-			baseXP = 100
+			return 100
 		}
 	} else if pnl < 0 {
 		loss := -pnl
-
 		switch {
 		case loss >= 10:
-			baseXP = 300
+			return 300
 		case loss >= 1:
-			baseXP = 100
+			return 100
 		}
 	}
+	return 0
+}
 
+// AwardTradeXP preserves profit/loss XP and active voucher boosts, independent
+// of whether the trade was funded by an ordinary account or the wallet.
+func AwardTradeXP(ctx context.Context, pool *pgxpool.Pool, userID int, pnl float64) int {
+	baseXP := tradeBaseXP(pnl)
 	if baseXP <= 0 {
 		return 0
 	}
-
 	if err := ensureRow(ctx, pool, userID); err != nil {
 		log.Println("battlepass ensure row failed:", err)
 		return 0
 	}
-
-	cardBonus := 0.0
-
-	if source.Kind == "card" {
-		tier, err := bankcards_sql.GetCardTier(
-			ctx,
-			pool,
-			source.CardID,
-		)
-
-		if err == nil {
-			if cfg, ok := bankcards_sql.Tiers[tier]; ok {
-				cardBonus = cfg.XpBonusPercent
-			}
-		}
-	}
-
-	return applyBoostAndAdd(
-		ctx,
-		pool,
-		userID,
-		baseXP,
-		cardBonus,
-	)
+	return applyBoostAndAdd(ctx, pool, userID, baseXP)
 }
 
 // AwardTransferXP начисляет XP за перевод.
@@ -253,13 +219,7 @@ func awardDailyCapped(
 		return 0
 	}
 
-	return applyBoostAndAdd(
-		ctx,
-		pool,
-		userID,
-		baseXP,
-		0,
-	)
+	return applyBoostAndAdd(ctx, pool, userID, baseXP)
 }
 
 // DevAddXP позволяет вручную добавить XP пользователю.
@@ -279,11 +239,5 @@ func DevAddXP(
 		return 0
 	}
 
-	return applyBoostAndAdd(
-		ctx,
-		pool,
-		userID,
-		amount,
-		0,
-	)
+	return applyBoostAndAdd(ctx, pool, userID, amount)
 }

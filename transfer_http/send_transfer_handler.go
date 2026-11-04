@@ -45,8 +45,10 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if req.Amount <= 0 {
-			http.Error(w, "amount must be positive", http.StatusBadRequest)
+		if err := bankcards_sql.ValidateCardAmount(req.Amount); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 

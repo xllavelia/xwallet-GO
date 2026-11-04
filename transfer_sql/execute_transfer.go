@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strings"
 
 	"xwallet-server/bankcards_sql"
@@ -23,28 +24,12 @@ func generateReferenceCode() (string, error) {
 }
 
 func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, recipientUserID int, amount float64) (int, float64, error) {
-
-	senderSource, err := bankcards_sql.ResolveAnyCard(ctx, pool, senderUserID)
-	if err != nil {
+	if err := bankcards_sql.ValidateCardAmount(amount); err != nil {
 		return 0, 0, err
 	}
-	recipientSource, err := bankcards_sql.ResolveAnyCard(ctx, pool, recipientUserID)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// Базовая ставка — если у отправителя вообще нет карты.
-	// Если карта есть (любая) — берём её персональный TransferFeePercent,
-	// который у Standard равен базовой 1%, а у платных тиров ниже/нулевой.
-	feePercent := bankcards_sql.BaseTransferFeePercent
-	if senderSource.Kind == "card" {
-		if tier, tErr := bankcards_sql.GetCardTier(ctx, pool, senderSource.CardID); tErr == nil {
-			if cfg, ok := bankcards_sql.Tiers[tier]; ok {
-				feePercent = cfg.TransferFeePercent
-			}
-		}
-	}
-	fee := amount * (feePercent / 100)
+	amount = math.Round(amount*100) / 100
+	// Единое округление сохраняет равенство списания, зачисления и комиссии.
+	fee := math.Round(amount) / 100
 	totalDebit := amount + fee
 
 	tx, err := pool.Begin(ctx)
@@ -52,6 +37,26 @@ func ExecuteTransfer(ctx context.Context, pool *pgxpool.Pool, senderUserID int, 
 		return 0, 0, err
 	}
 	defer tx.Rollback(ctx)
+
+	// Порядок блокировок исключает дедлок и смену источника денег во время перевода.
+	first, second := senderUserID, recipientUserID
+	if first > second {
+		first, second = second, first
+	}
+	for _, userID := range []int{first, second} {
+		var id int
+		if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE;`, userID).Scan(&id); err != nil {
+			return 0, 0, err
+		}
+	}
+	senderSource, err := bankcards_sql.ResolveAnyCard(ctx, tx, senderUserID)
+	if err != nil {
+		return 0, 0, err
+	}
+	recipientSource, err := bankcards_sql.ResolveAnyCard(ctx, tx, recipientUserID)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, senderSource, -totalDebit); err != nil {
 		if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
