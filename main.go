@@ -311,6 +311,7 @@ func main() {
 	http.HandleFunc("/bankcards/close", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CloseHandler(pool))))
 	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))
 	http.HandleFunc("/home/summary", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetSummaryHandler(pool))))
+	http.HandleFunc("/history/activity", auth_http.WithCORS(auth_http.RequireAuth(home_http.GetActivityHandler(pool))))
 	http.HandleFunc("/stocks/catalog", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.CatalogHandler(pool))))
 	http.HandleFunc("/stocks/chart", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.ChartHandler(pool))))
 	http.HandleFunc("/stocks/portfolio", auth_http.WithCORS(auth_http.RequireAuth(stocks_http.PortfolioHandler(pool))))
