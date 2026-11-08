@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"xwallet-server/profile_sql"
 )
 
 const (
@@ -18,13 +20,15 @@ const (
 )
 
 type BPReward struct {
-	Kind    string  `json:"kind"`
-	Value   float64 `json:"value,omitempty"`
-	Days    int     `json:"days,omitempty"`
-	Case    string  `json:"case,omitempty"`
-	Status  string  `json:"status,omitempty"`
-	Label   string  `json:"label,omitempty"`
-	Display string  `json:"display,omitempty"`
+	Kind         string  `json:"kind"`
+	Value        float64 `json:"value,omitempty"`
+	Days         int     `json:"days,omitempty"`
+	Case         string  `json:"case,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	Cosmetic     string  `json:"cosmetic,omitempty"`
+	CosmeticKind string  `json:"cosmeticKind,omitempty"`
+	Label        string  `json:"label,omitempty"`
+	Display      string  `json:"display,omitempty"`
 }
 
 type BPLevelRewards struct {
@@ -56,9 +60,23 @@ func bpCase(rarity string) BPReward {
 	return BPReward{Kind: "case", Case: rarity, Display: bpCaseTitle(rarity) + " case"}
 }
 
+func bpCosmetic(id string) BPReward {
+	cosmetic, ok := profile_sql.GetCosmetic(id)
+	if !ok || cosmetic.AdminOnly {
+		panic(fmt.Sprintf("invalid battle pass cosmetic %q", id))
+	}
+	return BPReward{
+		Kind: "cosmetic", Cosmetic: cosmetic.ID, CosmeticKind: cosmetic.Kind,
+		Label: cosmetic.Name, Display: cosmetic.Name + " " + cosmetic.Kind,
+	}
+}
+
 func bpStatus(status string) BPReward {
-	label := bpStatusLabel(status)
-	return BPReward{Kind: "status", Status: status, Label: label, Value: BPStatusFallback[status], Display: label + " status"}
+	reward := bpCosmetic(profile_sql.LegacyCosmetic(status))
+	reward.Kind = "status"
+	reward.Status = status
+	reward.Value = BPStatusFallback[status]
+	return reward
 }
 
 var BPStatusFallback = map[string]float64{
@@ -116,6 +134,15 @@ func bpCaseTitle(rarity string) string {
 }
 
 func BPFormatReward(r BPReward) string {
+	if r.Kind == "status" || r.Kind == "cosmetic" {
+		id := r.Cosmetic
+		if r.Kind == "status" {
+			id = profile_sql.LegacyCosmetic(r.Status)
+		}
+		if cosmetic, ok := profile_sql.GetCosmetic(id); ok {
+			return cosmetic.Name + " " + cosmetic.Kind
+		}
+	}
 	if r.Display != "" {
 		return r.Display
 	}
@@ -141,22 +168,22 @@ var BPPassRewards = []BPLevelRewards{
 	{Free: []BPReward{bpCash(5)}, Pass: []BPReward{bpCash(10)}},
 	{Free: []BPReward{bpRef(5)}, Pass: []BPReward{bpRef(10)}},
 	{Free: []BPReward{bpLavx(2)}, Pass: []BPReward{bpLavx(4)}},
-	{Free: []BPReward{bpFee(10, 2)}, Pass: []BPReward{bpFee(20, 4)}},
+	{Free: []BPReward{bpFee(10, 2), bpCosmetic("theme-sage")}, Pass: []BPReward{bpFee(20, 4)}},
 	{Free: []BPReward{bpCase("common")}, Pass: []BPReward{bpCase("rare")}},
 	{Free: []BPReward{bpCash(10)}, Pass: []BPReward{bpCash(20)}},
-	{Free: []BPReward{bpRef(10)}, Pass: []BPReward{bpRef(20)}},
+	{Free: []BPReward{bpRef(10)}, Pass: []BPReward{bpRef(20), bpCosmetic("theme-dusk")}},
 	{Free: []BPReward{bpCash(15)}, Pass: []BPReward{bpCash(30)}},
-	{Free: []BPReward{bpCase("rare"), bpCash(5)}, Pass: []BPReward{bpCase("epic"), bpCash(10)}},
+	{Free: []BPReward{bpCase("rare"), bpCash(5), bpCosmetic("pattern-leaf")}, Pass: []BPReward{bpCase("epic"), bpCash(10), bpCosmetic("emblem-crystal")}},
 	{Free: []BPReward{bpLavx(3)}, Pass: []BPReward{bpLavx(6)}},
-	{Free: []BPReward{bpCash(20)}, Pass: []BPReward{bpCash(40)}},
+	{Free: []BPReward{bpCash(20), bpCosmetic("theme-coral")}, Pass: []BPReward{bpCash(40)}},
 	{Free: []BPReward{bpFee(10, 3)}, Pass: []BPReward{bpFee(20, 3)}},
-	{Free: []BPReward{bpCase("common")}, Pass: []BPReward{bpCase("rare")}},
-	{Free: []BPReward{bpCash(25)}, Pass: []BPReward{bpCash(50)}},
+	{Free: []BPReward{bpCase("common")}, Pass: []BPReward{bpCase("rare"), bpCosmetic("pattern-spark")}},
+	{Free: []BPReward{bpCash(25), bpCosmetic("emblem-comet")}, Pass: []BPReward{bpCash(50)}},
 	{Free: []BPReward{bpRef(15)}, Pass: []BPReward{bpRef(30)}},
 	{Free: []BPReward{bpCash(30)}, Pass: []BPReward{bpCash(60)}},
-	{Free: []BPReward{bpCase("rare")}, Pass: []BPReward{bpCase("epic")}},
+	{Free: []BPReward{bpCase("rare")}, Pass: []BPReward{bpCase("epic"), bpCosmetic("theme-aurora")}},
 	{Free: []BPReward{bpLavx(5)}, Pass: []BPReward{bpLavx(10)}},
-	{Free: []BPReward{bpCase("epic")}, Pass: []BPReward{bpCase("mythic")}},
+	{Free: []BPReward{bpCase("epic"), bpCosmetic("theme-glacier")}, Pass: []BPReward{bpCase("mythic")}},
 	{Free: []BPReward{bpCash(35)}, Pass: []BPReward{bpCash(70)}},
 	{Free: []BPReward{bpFee(20, 4)}, Pass: []BPReward{bpFee(40, 4)}},
 	{Free: []BPReward{bpRef(20)}, Pass: []BPReward{bpRef(40)}},
@@ -168,11 +195,11 @@ var BPPassRewards = []BPLevelRewards{
 	{Free: []BPReward{bpCash(50)}, Pass: []BPReward{bpCash(100)}},
 	{Free: []BPReward{bpCase("epic"), bpCash(25)}, Pass: []BPReward{bpCase("mythic"), bpCash(50)}},
 	{Free: []BPReward{bpFee(30, 5)}, Pass: []BPReward{bpFee(60, 5)}},
-	{Free: []BPReward{bpRef(30)}, Pass: []BPReward{bpRef(60)}},
+	{Free: []BPReward{bpRef(30)}, Pass: []BPReward{bpRef(60), bpCosmetic("theme-ember")}},
 	{Free: []BPReward{bpCash(60)}, Pass: []BPReward{bpCash(120)}},
 	{Free: []BPReward{bpCase("rare")}, Pass: []BPReward{bpCase("epic")}},
 	{Free: []BPReward{bpCash(75)}, Pass: []BPReward{bpCash(150)}},
-	{Free: []BPReward{bpFee(40, 5)}, Pass: []BPReward{bpFee(80, 5)}},
+	{Free: []BPReward{bpFee(40, 5)}, Pass: []BPReward{bpFee(80, 5), bpCosmetic("pattern-constellation")}},
 	{Free: []BPReward{bpCash(80)}, Pass: []BPReward{bpCash(160)}},
 	{Free: []BPReward{bpLavx(10)}, Pass: []BPReward{bpLavx(20)}},
 	{Free: []BPReward{bpCash(90)}, Pass: []BPReward{bpCash(180)}},
@@ -181,7 +208,7 @@ var BPPassRewards = []BPLevelRewards{
 	{Free: []BPReward{bpFee(50, 7)}, Pass: []BPReward{bpFee(100, 7)}},
 	{Free: []BPReward{bpRef(30)}, Pass: []BPReward{bpRef(60)}},
 	{Free: []BPReward{bpCase("mythic")}, Pass: []BPReward{bpCase("legendary")}},
-	{Free: []BPReward{bpCash(120)}, Pass: []BPReward{bpCash(240)}},
+	{Free: []BPReward{bpCash(120)}, Pass: []BPReward{bpCash(240), bpCosmetic("theme-prism")}},
 	{Free: []BPReward{bpFee(100, 7)}, Pass: []BPReward{bpFee(200, 10)}},
 	{Free: []BPReward{bpCash(150)}, Pass: []BPReward{bpCash(300)}},
 	{Free: []BPReward{bpLavx(15)}, Pass: []BPReward{bpLavx(30)}},
@@ -197,14 +224,16 @@ func BPLevelRewardsFor(level int) BPLevelRewards {
 }
 
 type BPCaseEntry struct {
-	Index   int     `json:"index"`
-	Kind    string  `json:"kind"`
-	Value   float64 `json:"value,omitempty"`
-	Days    int     `json:"days,omitempty"`
-	Status  string  `json:"status,omitempty"`
-	Label   string  `json:"label,omitempty"`
-	Display string  `json:"display"`
-	Chance  int     `json:"chance"`
+	Index        int     `json:"index"`
+	Kind         string  `json:"kind"`
+	Value        float64 `json:"value,omitempty"`
+	Days         int     `json:"days,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	Cosmetic     string  `json:"cosmetic,omitempty"`
+	CosmeticKind string  `json:"cosmeticKind,omitempty"`
+	Label        string  `json:"label,omitempty"`
+	Display      string  `json:"display"`
+	Chance       int     `json:"chance"`
 }
 
 type BPCaseDef struct {
@@ -235,10 +264,19 @@ func bpc(kind string, value float64, days int, status string, chance int) BPCase
 	case "fee":
 		e.Display = fmt.Sprintf("$%s fee · %dd", bpNum(value), days)
 	case "status":
-		e.Label = bpStatusLabel(status)
-		e.Display = e.Label + " status"
+		reward := bpStatus(status)
+		e.Cosmetic, e.CosmeticKind = reward.Cosmetic, reward.CosmeticKind
+		e.Label, e.Display = reward.Label, reward.Display
 	}
 	return e
+}
+
+func bpCaseCosmetic(id string, chance int) BPCaseEntry {
+	reward := bpCosmetic(id)
+	return BPCaseEntry{
+		Kind: reward.Kind, Cosmetic: reward.Cosmetic, CosmeticKind: reward.CosmeticKind,
+		Label: reward.Label, Display: reward.Display, Chance: chance,
+	}
 }
 
 func bpBuildCases() map[string]BPCaseDef {
@@ -251,7 +289,7 @@ func bpBuildCases() map[string]BPCaseDef {
 				bpc("lavx", 3, 0, "", 20),
 				bpc("fee", 20, 4, "", 20),
 				bpc("cash", 10, 0, "", 10),
-				bpc("status", 0, 0, "lucky", 5),
+				bpCaseCosmetic("emblem-fox", 5),
 				bpc("fee", 100, 7, "", 3),
 				bpc("status", 0, 0, "valter", 2),
 			},
@@ -259,13 +297,15 @@ func bpBuildCases() map[string]BPCaseDef {
 		"rare": {
 			Rarity: "rare", Title: "Rare case", Subtitle: "Odds get a little more interesting.",
 			Entries: []BPCaseEntry{
-				bpc("cash", 10, 0, "", 20),
-				bpc("ref", 40, 0, "", 15),
-				bpc("lavx", 6, 0, "", 20),
-				bpc("fee", 40, 4, "", 15),
-				bpc("cash", 25, 0, "", 10),
-				bpc("ref", 25, 0, "", 8),
-				bpc("status", 0, 0, "lucky", 5),
+				bpc("cash", 10, 0, "", 17),
+				bpc("ref", 40, 0, "", 14),
+				bpc("lavx", 6, 0, "", 19),
+				bpc("fee", 40, 4, "", 14),
+				bpc("cash", 25, 0, "", 9),
+				bpc("ref", 25, 0, "", 7),
+				bpCaseCosmetic("pattern-waves", 5),
+				bpCaseCosmetic("theme-cocoa", 4),
+				bpCaseCosmetic("theme-olive", 4),
 				bpc("fee", 200, 7, "", 3),
 				bpc("status", 0, 0, "silver", 2),
 				bpc("cash", 50, 0, "", 1),
@@ -330,12 +370,13 @@ func bpBuildCases() map[string]BPCaseDef {
 				bpc("ref", 200, 0, "", 20),
 				bpc("lavx", 30, 0, "", 20),
 				bpc("fee", 2000, 30, "", 20),
-				bpc("lavx", 70, 0, "", 5),
+				bpc("lavx", 70, 0, "", 4),
 				bpc("cash", 700, 0, "", 5),
 				bpc("fee", 5000, 30, "", 5),
 				bpc("lavx", 100, 0, "", 3),
 				bpc("cash", 2000, 0, "", 1),
 				bpc("status", 0, 0, "owner", 1),
+				bpCaseCosmetic("emblem-eclipse", 1),
 			},
 		},
 	}

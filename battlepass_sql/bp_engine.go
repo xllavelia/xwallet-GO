@@ -2,12 +2,14 @@ package battlepass_sql
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"log"
 	"math"
+	"math/big"
 	"math/rand"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"xwallet-server/profile_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
 )
@@ -141,10 +144,11 @@ type BPQuestClaimResult struct {
 }
 
 type BPCaseRoll struct {
-	Entry   BPCaseEntry `json:"entry"`
-	Index   int         `json:"index"`
-	Note    string      `json:"note,omitempty"`
-	Granted string      `json:"granted"`
+	Entry    BPCaseEntry `json:"entry"`
+	Index    int         `json:"index"`
+	Cosmetic string      `json:"cosmetic,omitempty"`
+	Note     string      `json:"note,omitempty"`
+	Granted  string      `json:"granted"`
 }
 
 type BPCaseOpenResult struct {
@@ -874,6 +878,10 @@ ON CONFLICT (user_id, season_id, level, track) DO NOTHING;
 }
 
 func bpGrantRewardTx(ctx context.Context, tx pgx.Tx, userID int, seasonID int64, r BPReward, level int, track string, convertFull bool) (int64, string, error) {
+	cosmeticSource := "battlepass"
+	if convertFull {
+		cosmeticSource = "case"
+	}
 	switch r.Kind {
 	case "cash":
 		tag, err := tx.Exec(ctx, `
@@ -937,12 +945,28 @@ RETURNING id;
 			return 0, "", err
 		}
 		return id, "", nil
+	case "cosmetic":
+		cosmetic, ok := profile_sql.GetCosmetic(r.Cosmetic)
+		if !ok || cosmetic.AdminOnly || r.Value != 0 {
+			return 0, "", fmt.Errorf("invalid cosmetic reward %q", r.Cosmetic)
+		}
+		if _, err := profile_sql.GrantCosmeticTx(ctx, tx, userID, cosmetic.ID, cosmeticSource); err != nil {
+			return 0, "", err
+		}
 	case "status":
+		cosmeticID := profile_sql.LegacyCosmetic(r.Status)
+		if cosmeticID == "" {
+			return 0, "", fmt.Errorf("unknown legacy status %q", r.Status)
+		}
 		tag, err := tx.Exec(ctx, `
 INSERT INTO user_statuses(user_id, status) VALUES ($1, $2)
 ON CONFLICT (user_id, status) DO NOTHING;
 `, userID, r.Status)
 		if err != nil {
+			return 0, "", err
+		}
+		// Денежная конвертация опирается на старый статус, а не на цвет профиля.
+		if _, err := profile_sql.GrantCosmeticTx(ctx, tx, userID, cosmeticID, cosmeticSource); err != nil {
 			return 0, "", err
 		}
 		if tag.RowsAffected() == 0 {
@@ -1039,17 +1063,20 @@ SELECT EXISTS(SELECT 1 FROM bp_passes WHERE user_id = $1 AND season_id = $2);
 	}, nil
 }
 
-func bpRollCase(def BPCaseDef) (BPCaseEntry, int) {
-	n := rand.Intn(100)
+func bpRollCase(def BPCaseDef) (BPCaseEntry, int, error) {
+	roll, err := cryptorand.Int(cryptorand.Reader, big.NewInt(100))
+	if err != nil {
+		return BPCaseEntry{}, 0, err
+	}
+	n := int(roll.Int64())
 	cum := 0
 	for i, e := range def.Entries {
 		cum += e.Chance
 		if n < cum {
-			return e, i
+			return e, i, nil
 		}
 	}
-	last := len(def.Entries) - 1
-	return def.Entries[last], last
+	return BPCaseEntry{}, 0, fmt.Errorf("invalid case chances for %q", def.Rarity)
 }
 
 func BPOpenCase(ctx context.Context, pool *pgxpool.Pool, userID int, tokenID int64) (*BPCaseOpenResult, error) {
@@ -1096,15 +1123,15 @@ FOR UPDATE;
 	if !ok {
 		return nil, BPErrCaseNotFound
 	}
-	entry, idx := bpRollCase(def)
+	entry, idx, err := bpRollCase(def)
+	if err != nil {
+		return nil, err
+	}
 
 	reward := BPReward{
-		Kind:    entry.Kind,
-		Value:   entry.Value,
-		Days:    entry.Days,
-		Status:  entry.Status,
-		Label:   entry.Label,
-		Display: entry.Display,
+		Kind: entry.Kind, Value: entry.Value, Days: entry.Days, Status: entry.Status,
+		Cosmetic: entry.Cosmetic, CosmeticKind: entry.CosmeticKind,
+		Label: entry.Label, Display: entry.Display,
 	}
 	if entry.Kind == "status" {
 		reward.Value = BPStatusFallback[entry.Status]
@@ -1121,7 +1148,7 @@ FOR UPDATE;
 	if note != "" {
 		granted = note
 	}
-	roll := BPCaseRoll{Entry: entry, Index: idx, Note: note, Granted: granted}
+	roll := BPCaseRoll{Entry: entry, Index: idx, Cosmetic: entry.Cosmetic, Note: note, Granted: granted}
 	raw, _ := json.Marshal(roll)
 	if _, err := tx.Exec(ctx, `
 UPDATE bp_case_tokens SET opened_at = now(), roll = $1 WHERE id = $2;

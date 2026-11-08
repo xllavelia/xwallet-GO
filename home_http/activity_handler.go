@@ -14,6 +14,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
+	"xwallet-server/profile_sql"
 	"xwallet-server/rewards_sql"
 
 	"github.com/jackc/pgx/v5"
@@ -62,7 +63,7 @@ func newActivityResponse() activityResponse {
 			"Slots purchase dates are not recorded; dated totals include payouts only.",
 			"Slots payouts are calendar-day totals; midnight UTC represents the recorded date, not an individual payout time.",
 			"Daily and battle pass level rewards and pass prices use current catalogs; historical catalog versions are not recorded.",
-			"Daily voucher issuance can be skipped when slots are full; claims do not record that outcome. Battle pass level status grants or duplicate cash conversions are not recorded; status values are not counted as cash.",
+			"Daily voucher issuance can be skipped when slots are full; claims do not record that outcome. Battle pass level status grants or duplicate cash conversions are not recorded; status values are not counted as cash. New cosmetic rewards are not inferred from historical level claims.",
 			"Legacy TIMESTAMP fields have no stored timezone and are exposed as UTC. Rocket and Flip payouts use round ended_at; individual payout timestamps are not recorded.",
 		},
 	}
@@ -231,8 +232,8 @@ func battlepassRewardAmount(reward battlepass_sql.BPReward) (string, string, flo
 		return "voucher", "voucher_issued", math.Abs(reward.Value), nil
 	case "case":
 		return "case", "case_issued", 1, nil
-	case "status":
-		return "status", "status", 1, nil
+	case "status", "cosmetic":
+		return "cosmetic", "cosmetic", 1, nil
 	default:
 		return "", "", 0, fmt.Errorf("unknown battle pass reward %q", reward.Kind)
 	}
@@ -254,6 +255,10 @@ func battlepassActivityEvents(userID int, seasonID int64, season string, level i
 	}
 	events := []activityEvent{}
 	for i, reward := range rewards {
+		// Старые клеймы не содержат снимок наград и не доказывают новое открытие.
+		if reward.Kind == "cosmetic" {
+			continue
+		}
 		asset, kind, amount, err := battlepassRewardAmount(reward)
 		if err != nil {
 			return nil, err
@@ -261,7 +266,8 @@ func battlepassActivityEvents(userID int, seasonID int64, season string, level i
 		facts := []activityFact{activityFactFor("Season", season), activityFactFor("Level", strconv.Itoa(level)),
 			activityFactFor("Track", track), activityFactFor("Reward", battlepass_sql.BPFormatReward(reward))}
 		if reward.Kind == "status" {
-			facts = append(facts, activityFactFor("Outcome", "Status or duplicate conversion not recorded"))
+			facts = append(facts, activityFactFor("Cosmetic", reward.Cosmetic),
+				activityFactFor("Outcome", "Status or duplicate conversion not recorded"))
 		}
 		events = append(events, makeActivityEvent(fmt.Sprintf("bp:claim:%d:%d:%d:%s:%d", userID, seasonID, level, track, i),
 			"battlepass", kind, fmt.Sprintf("Level %d reward", level),
@@ -339,7 +345,10 @@ func caseActivityAmount(roll battlepass_sql.BPCaseRoll) (string, string, float64
 	if roll.Note != "" {
 		return "", "", 0, fmt.Errorf("unknown stored case note %q", roll.Note)
 	}
-	asset, kind, amount, err := battlepassRewardAmount(battlepass_sql.BPReward{Kind: roll.Entry.Kind, Value: roll.Entry.Value})
+	asset, kind, amount, err := battlepassRewardAmount(battlepass_sql.BPReward{
+		Kind: roll.Entry.Kind, Value: roll.Entry.Value, Status: roll.Entry.Status,
+		Cosmetic: roll.Entry.Cosmetic, CosmeticKind: roll.Entry.CosmeticKind,
+	})
 	if kind == "reward" {
 		kind = "payout"
 	}
@@ -370,6 +379,20 @@ func loadCaseActivity(ctx context.Context, tx pgx.Tx, userID int, response *acti
 		}
 		facts := []activityFact{activityFactFor("Season", season), activityFactFor("Rarity", rarity), activityFactFor("Level", strconv.Itoa(level)),
 			activityFactFor("Track", track), activityFactFor("Granted", roll.Granted)}
+		if roll.Entry.Kind == "cosmetic" || roll.Entry.Kind == "status" {
+			cosmeticID := roll.Entry.Cosmetic
+			if cosmeticID == "" {
+				cosmeticID = roll.Cosmetic
+			}
+			if roll.Entry.Kind == "status" {
+				cosmeticID = profile_sql.LegacyCosmetic(roll.Entry.Status)
+			}
+			facts = append(facts, activityFactFor("Cosmetic", cosmeticID),
+				activityFactFor("Reward", battlepass_sql.BPFormatReward(battlepass_sql.BPReward{
+					Kind: roll.Entry.Kind, Cosmetic: cosmeticID, Status: roll.Entry.Status,
+					Display: roll.Entry.Display,
+				})))
+		}
 		if roll.Note != "" {
 			facts = append(facts, activityFactFor("Note", roll.Note))
 		}

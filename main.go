@@ -40,6 +40,8 @@ import (
 	"xwallet-server/priceoracle"
 	"xwallet-server/prime_http"
 	"xwallet-server/prime_sql"
+	"xwallet-server/profile_http"
+	"xwallet-server/profile_sql"
 	"xwallet-server/promo_http"
 	"xwallet-server/promo_sql"
 	"xwallet-server/referral_http"
@@ -238,6 +240,10 @@ func main() {
 		log.Fatal("slots migrate: ", err)
 	}
 
+	if err := profile_sql.MigrateSchema(ctx, pool); err != nil {
+		log.Fatal("profile/community schema migration: ", err)
+	}
+
 	log.Println("all tables ready")
 
 	adminExists, err := users_sql.PlayerIDExists(ctx, pool, "000001")
@@ -257,6 +263,7 @@ func main() {
 	http.HandleFunc("/auth/login", auth_http.WithCORS(auth_http.LoginHandler(pool)))
 	http.HandleFunc("/auth/generate-id", auth_http.WithCORS(auth_http.GenerateIDHandler(pool)))
 	http.HandleFunc("/auth/me", auth_http.WithCORS(auth_http.RequireAuth(auth_http.MeHandler(pool))))
+	profile_http.RegisterRoutes(http.DefaultServeMux, pool)
 	http.HandleFunc("/wallet", auth_http.WithCORS(auth_http.RequireAuth(wallet_http.GetWalletHandler(pool))))
 	http.HandleFunc("/positions/open", auth_http.WithCORS(auth_http.RequireAuth(positions_http.OpenPositionHandler(pool))))
 	http.HandleFunc("/positions/close", auth_http.WithCORS(auth_http.RequireAuth(positions_http.ClosePositionHandler(pool))))

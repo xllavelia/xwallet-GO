@@ -82,7 +82,7 @@ func TestBattlepassActualCashComponents(t *testing.T) {
 			if event.Asset == "USD" {
 				cash += event.Amount
 			}
-			if event.Asset == "status" && event.Amount != 1 {
+			if event.Asset == "cosmetic" && (event.Amount != 1 || event.Kind != "cosmetic") {
 				t.Fatalf("status fallback value used as amount: %+v", event)
 			}
 			if event.Asset == "case" && (event.Amount != 1 || event.Kind != "case_issued") {
@@ -110,6 +110,72 @@ func TestBattlepassActualCashComponents(t *testing.T) {
 	}
 }
 
+func TestBattlepassHistoryDoesNotInventCosmetics(t *testing.T) {
+	at := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		level int
+		track string
+	}{
+		{5, "free"}, {10, "free"}, {12, "free"}, {15, "free"}, {20, "free"},
+		{8, "pass"}, {10, "pass"}, {14, "pass"}, {18, "pass"}, {32, "pass"}, {36, "pass"}, {45, "pass"},
+	} {
+		events, err := battlepassActivityEvents(5, 2, "Season 2", test.level, test.track, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := battlepass_sql.BPLevelRewardsFor(test.level)
+		rewards := row.Free
+		if test.track == "pass" {
+			rewards = row.Pass
+		}
+		var original []battlepass_sql.BPReward
+		for _, reward := range rewards {
+			if reward.Kind != "cosmetic" {
+				original = append(original, reward)
+			}
+		}
+		if len(events) != len(original) {
+			t.Fatalf("level %d/%s invented an old unlock: %+v", test.level, test.track, events)
+		}
+		for i, event := range events {
+			asset, kind, amount, err := battlepassRewardAmount(original[i])
+			if err != nil || event.Asset != asset || event.Kind != kind || event.Amount != amount || event.Asset == "cosmetic" {
+				t.Fatalf("old reward changed: %+v, %v", event, err)
+			}
+			if event.ID != fmt.Sprintf("bp:claim:5:2:%d:%s:%d", test.level, test.track, i) {
+				t.Fatalf("original event ID changed: %s", event.ID)
+			}
+		}
+	}
+	for _, test := range []struct {
+		level int
+		track string
+		id    string
+	}{{25, "free", "theme-sage"}, {25, "pass", "theme-dusk"}, {40, "free", "emblem-fox"}, {40, "pass", "theme-gold"}, {50, "pass", "emblem-crown"}} {
+		events, err := battlepassActivityEvents(5, 2, "Season 2", test.level, test.track, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found bool
+		for _, event := range events {
+			if event.Asset != "cosmetic" {
+				continue
+			}
+			found = true
+			facts := map[string]string{}
+			for _, fact := range event.Facts {
+				facts[fact.Label] = fact.Value
+			}
+			if event.Amount != 1 || event.Kind != "cosmetic" || facts["Cosmetic"] != test.id || facts["Outcome"] != "Status or duplicate conversion not recorded" || strings.HasSuffix(facts["Reward"], " status") {
+				t.Fatalf("legacy status history lost mapping/uncertainty: %+v", event)
+			}
+		}
+		if !found {
+			t.Fatalf("legacy status event lost at %d/%s", test.level, test.track)
+		}
+	}
+}
+
 func TestCaseUsesPersistedConversions(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -122,7 +188,10 @@ func TestCaseUsesPersistedConversions(t *testing.T) {
 		{"lavx", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "lavx", Value: 10}, Granted: "10 LAVX"}, "LAVX", "payout", 10},
 		{"ref", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "ref", Value: 80}, Granted: "80 REF XP"}, "REF XP", "payout", 80},
 		{"fee voucher", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "fee", Value: 100}, Granted: "$100 fee · 5d"}, "voucher", "voucher_issued", 100},
-		{"status", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Value: 2000}, Granted: "Owner status"}, "status", "status", 1},
+		{"status", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Value: 2000}, Granted: "Owner status"}, "cosmetic", "cosmetic", 1},
+		{"cosmetic", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "cosmetic", Cosmetic: "pattern-waves"}, Cosmetic: "pattern-waves", Granted: "Waves pattern"}, "cosmetic", "cosmetic", 1},
+		{"cosmetic not cash", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "cosmetic", Cosmetic: "emblem-eclipse", Value: 2000}, Granted: "Eclipse emblem"}, "cosmetic", "cosmetic", 1},
+		{"mapped duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Cosmetic: "theme-supernova"}, Note: "duplicate Owner status → $2000", Granted: "duplicate Owner status → $2000"}, "USD", "payout", 2000},
 		{"duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Value: 2000}, Note: "duplicate Owner status → $17.5", Granted: "duplicate Owner status → $17.5"}, "USD", "payout", 17.5},
 		{"duplicate granted", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "gold"}, Granted: "duplicate Gold status → $42"}, "USD", "payout", 42},
 		{"full slots note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "fee", Value: 100}, Note: "$147.3 fee · 5d added as cash (voucher slots full)", Granted: "$147.3 fee · 5d added as cash (voucher slots full)"}, "USD", "payout", 147.3},
@@ -144,9 +213,40 @@ func TestCaseUsesPersistedConversions(t *testing.T) {
 		{Entry: battlepass_sql.BPCaseEntry{Kind: "status"}, Note: "duplicate Owner status → $NaN"},
 		{Entry: battlepass_sql.BPCaseEntry{Kind: "fee"}, Note: "$Inf fee · 5d added as cash (voucher slots full)"},
 		{Entry: battlepass_sql.BPCaseEntry{Kind: "fee"}, Note: "unrecognized conversion"},
+		{Entry: battlepass_sql.BPCaseEntry{Kind: "cosmetic", Cosmetic: "pattern-waves"}, Note: "duplicate Waves pattern → $25"},
 	} {
 		if _, _, _, err := caseActivityAmount(roll); err == nil {
 			t.Fatalf("malformed stored roll silently accepted: %+v", roll)
+		}
+	}
+}
+
+func TestCaseCosmeticFactsUseStoredItem(t *testing.T) {
+	at := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		raw, id, asset string
+		amount         float64
+	}{
+		{`{"entry":{"kind":"cosmetic","cosmetic":"pattern-waves","display":"Waves pattern"},"cosmetic":"pattern-waves","granted":"Waves pattern"}`, "pattern-waves", "cosmetic", 1},
+		{`{"entry":{"kind":"cosmetic","display":"Eclipse emblem"},"cosmetic":"emblem-eclipse","granted":"Eclipse emblem"}`, "emblem-eclipse", "cosmetic", 1},
+		{`{"entry":{"kind":"status","status":"owner","value":2000},"granted":"Owner status"}`, "theme-supernova", "cosmetic", 1},
+		{`{"entry":{"kind":"status","status":"owner","cosmetic":"theme-supernova"},"note":"duplicate Owner status → $2000","granted":"duplicate Owner status → $2000"}`, "theme-supernova", "USD", 2000},
+	} {
+		tx := &activityFixtureTx{sets: [][][]any{{{int64(91), "rare", []byte(test.raw), at, 10, "free", "Season 1"}}}}
+		response := newActivityResponse()
+		if err := loadCaseActivity(context.Background(), tx, 5, &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Events) != 1 {
+			t.Fatalf("case event count = %d", len(response.Events))
+		}
+		event := response.Events[0]
+		facts := map[string]string{}
+		for _, fact := range event.Facts {
+			facts[fact.Label] = fact.Value
+		}
+		if event.Asset != test.asset || event.Amount != test.amount || facts["Cosmetic"] != test.id || facts["Reward"] == "" || strings.HasSuffix(facts["Reward"], " status") {
+			t.Fatalf("stored case item/amount missing or invented: %+v", event)
 		}
 	}
 }
