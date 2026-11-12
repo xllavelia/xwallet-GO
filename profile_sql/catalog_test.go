@@ -8,12 +8,12 @@ import (
 
 func TestCatalogContract(t *testing.T) {
 	catalog := Catalog()
-	if len(catalog) != 36 {
+	if len(catalog) != 18 {
 		t.Fatalf("catalog size = %d", len(catalog))
 	}
 	seen := map[string]bool{}
 	for _, c := range catalog {
-		if seen[c.ID] || !strings.HasPrefix(c.ID, c.Kind+"-") {
+		if seen[c.ID] || !strings.HasPrefix(c.ID, "card-") || c.Kind != "card" {
 			t.Fatalf("invalid/nonunique cosmetic: %+v", c)
 		}
 		seen[c.ID] = true
@@ -26,15 +26,21 @@ func TestCatalogContract(t *testing.T) {
 		if c.Source == "battlepass" && (c.Level < 1 || c.Level > 50 || (c.Track != "free" && c.Track != "pass")) {
 			t.Fatalf("bad battle pass cosmetic: %+v", c)
 		}
+		if len(c.Colors) != 2 {
+			t.Fatalf("card design needs left color and ink: %+v", c)
+		}
+		for _, color := range c.Colors {
+			if !strings.HasPrefix(color, "#") || len(color) != 7 {
+				t.Fatalf("bad design color %q", color)
+			}
+		}
 	}
 	wantLevels := map[string]struct {
 		level int
 		track string
 	}{
-		"theme-sage": {5, "free"}, "theme-coral": {12, "free"}, "theme-glacier": {20, "free"},
-		"theme-dusk": {8, "pass"}, "theme-aurora": {18, "pass"}, "theme-ember": {32, "pass"}, "theme-prism": {45, "pass"},
-		"emblem-comet": {15, "free"}, "emblem-crystal": {10, "pass"}, "emblem-crown": {50, "pass"},
-		"pattern-leaf": {10, "free"}, "pattern-spark": {14, "pass"}, "pattern-constellation": {36, "pass"},
+		"card-sage": {5, "free"}, "card-coral": {12, "free"}, "card-glacier": {20, "free"},
+		"card-dusk": {8, "pass"}, "card-aurora": {18, "pass"}, "card-ember": {32, "pass"}, "card-prism": {45, "pass"},
 	}
 	for id, want := range wantLevels {
 		c, ok := GetCosmetic(id)
@@ -42,7 +48,7 @@ func TestCatalogContract(t *testing.T) {
 			t.Fatalf("contract changed for %s: %+v", id, c)
 		}
 	}
-	for id, price := range map[string]int{"theme-silk": 50, "theme-nebula": 100, "theme-iridescent": 200} {
+	for id, price := range map[string]int{"card-silk": 50, "card-nebula": 100, "card-iridescent": 200} {
 		c, ok := GetCosmetic(id)
 		if !ok || c.Price != price {
 			t.Fatalf("bad shop price %s", id)
@@ -54,35 +60,19 @@ func TestCatalogContract(t *testing.T) {
 	}
 }
 
-func TestOwnershipAndLegacyContract(t *testing.T) {
-	want := map[string]string{"lucky": "theme-sage", "valter": "theme-dusk", "chicken_burger": "emblem-fox",
-		"silver": "theme-silver", "gold": "theme-gold", "platinum": "theme-platinum", "legend": "emblem-dragon",
-		"owner": "theme-supernova", "first": "emblem-crown"}
-	owned := map[string]bool{}
-	for status, id := range want {
-		if LegacyCosmetic(status) != id || LegacyCosmetic(" "+strings.ToUpper(status)+" ") != id {
-			t.Fatalf("legacy %s", status)
-		}
-		owned[id] = true
-	}
-	if LegacyCosmetic("admin") != "" || LegacyCosmetic("unknown") != "" {
-		t.Fatal("unknown status grants access")
-	}
+func TestOwnershipContract(t *testing.T) {
+	owned := map[string]bool{"card-sage": true, "card-gold": true}
 	for _, c := range Catalog() {
 		if !HasCosmetic(c.ID, nil, true) {
 			t.Fatalf("administrator missing cosmetic: %s", c.ID)
 		}
 		if c.AdminOnly {
-			owned[c.ID] = true
 			if HasCosmetic(c.ID, owned, false) || !HasCosmetic(c.ID, nil, true) {
 				t.Fatal("admin access violation")
 			}
-			if displayCosmetic(c.ID, c.Kind, "fallback", owned, false) != "fallback" {
-				t.Fatal("revoked admin displayed exclusive")
-			}
-		} else if c.Source == "starter" || owned[c.ID] {
+		} else if owned[c.ID] {
 			if !HasCosmetic(c.ID, owned, false) {
-				t.Fatalf("owned/starter not available: %s", c.ID)
+				t.Fatalf("owned not available: %s", c.ID)
 			}
 		} else if HasCosmetic(c.ID, owned, false) {
 			t.Fatalf("unowned available: %s", c.ID)
@@ -91,13 +81,29 @@ func TestOwnershipAndLegacyContract(t *testing.T) {
 	if HasCosmetic("invalid", owned, true) {
 		t.Fatal("admin can equip nonexistent cosmetic")
 	}
-	if displayCosmetic("emblem-fox", "theme", DefaultTheme, owned, false) != DefaultTheme {
-		t.Fatal("kind confusion")
-	}
 	for _, c := range CatalogFor(owned, false) {
 		if c.AdminOnly && c.Owned {
 			t.Fatal("catalog leaked admin ownership")
 		}
+		if c.Owned != owned[c.ID] {
+			t.Fatalf("catalog ownership wrong for %s", c.ID)
+		}
+	}
+}
+
+func TestCardDesignColors(t *testing.T) {
+	colors, ok := CardDesignColors("card-gold")
+	if !ok || colors[0] == "" || colors[1] == "" {
+		t.Fatal("card-gold colors missing")
+	}
+	if _, ok := CardDesignColors("theme-gold"); ok {
+		t.Fatal("legacy id accepted")
+	}
+	if key, ok := NormalizeCardDesignKey(" Card-Gold "); !ok || key != "card-gold" {
+		t.Fatal("normalization failed")
+	}
+	if _, ok := NormalizeCardDesignKey("theme-gold"); ok {
+		t.Fatal("non-card kind accepted")
 	}
 }
 
@@ -112,12 +118,12 @@ func TestPublicProfileRedaction(t *testing.T) {
 	if err = json.Unmarshal(data, &obj); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"balance", "lavxBalance", "passwordHash", "password_hash", "userId", "profit24h", "deviceId", "banReason"} {
+	for _, key := range []string{"balance", "lavxBalance", "passwordHash", "password_hash", "userId", "profit24h", "deviceId", "banReason", "themeId", "emblemId", "patternId"} {
 		if _, ok := obj[key]; ok {
 			t.Fatalf("private property: %s", key)
 		}
 	}
-	if len(obj) != 11 {
+	if len(obj) != 9 {
 		t.Fatalf("unexpected public schema: %s", data)
 	}
 	p.ShowBalance, p.Balance = true, &balance

@@ -8,6 +8,8 @@ type Card struct {
 	Tier               string
 	Name               string
 	DesignID           int
+	DesignKey          string
+	Custom             *CardCustomDesign
 	CardNumber         string
 	Balance            float64
 	IsActiveForTrading bool

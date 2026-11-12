@@ -15,13 +15,13 @@ import (
 
 var ErrMaxCardsReached = errors.New("maximum of 5 accounts reached")
 var ErrInvalidName = errors.New("name must contain 1 to 32 characters and no control characters")
-var ErrInvalidDesign = errors.New("designId must be between 0 and 4")
 var ErrInvalidAmount = errors.New("amount must be finite, positive, and in whole cents")
 var ErrCardNotFound = errors.New("card not found")
 var ErrCardFunded = errors.New("cannot close an account with a nonzero balance")
 var ErrCardHasOpenPositions = errors.New("cannot close an account funding open positions")
 
-func ValidateOpenCard(name string, designID int) (string, error) {
+// ValidateOpenCard проверяет имя счёта; оформление проверяется отдельно через ValidateDesignChoice.
+func ValidateOpenCard(name string) (string, error) {
 	if !utf8.ValidString(name) {
 		return "", ErrInvalidName
 	}
@@ -33,9 +33,6 @@ func ValidateOpenCard(name string, designID int) (string, error) {
 	name = strings.TrimSpace(name)
 	if n := utf8.RuneCountInString(name); n < 1 || n > 32 {
 		return "", ErrInvalidName
-	}
-	if designID < 0 || designID > 4 {
-		return "", ErrInvalidDesign
 	}
 	return name, nil
 }
@@ -70,7 +67,7 @@ func lockUser(ctx context.Context, q Queryer, userID int) error {
 
 func ListCards(ctx context.Context, pool *pgxpool.Pool, userID int) ([]Card, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, user_id, tier, name, design_id, card_number, balance, is_active_for_trading, last_lavx_grant_at, opened_at
+		SELECT id, user_id, tier, name, design_id, design_key, custom, card_number, balance, is_active_for_trading, last_lavx_grant_at, opened_at
 		FROM bank_cards WHERE user_id = $1 ORDER BY opened_at ASC, id ASC;
 	`, userID)
 	if err != nil {
@@ -81,7 +78,11 @@ func ListCards(ctx context.Context, pool *pgxpool.Pool, userID int) ([]Card, err
 	result := []Card{}
 	for rows.Next() {
 		var c Card
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Tier, &c.Name, &c.DesignID, &c.CardNumber, &c.Balance, &c.IsActiveForTrading, &c.LastLavxGrantAt, &c.OpenedAt); err != nil {
+		var customRaw []byte
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Tier, &c.Name, &c.DesignID, &c.DesignKey, &customRaw, &c.CardNumber, &c.Balance, &c.IsActiveForTrading, &c.LastLavxGrantAt, &c.OpenedAt); err != nil {
+			return nil, err
+		}
+		if c.Custom, err = scanCustom(customRaw); err != nil {
 			return nil, err
 		}
 		result = append(result, c)
@@ -89,25 +90,7 @@ func ListCards(ctx context.Context, pool *pgxpool.Pool, userID int) ([]Card, err
 	return result, rows.Err()
 }
 
-func OpenCard(ctx context.Context, pool *pgxpool.Pool, userID int, name string, designID int) (Card, error) {
-	name, err := ValidateOpenCard(name, designID)
-	if err != nil {
-		return Card{}, err
-	}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return Card{}, err
-	}
-	defer tx.Rollback(ctx)
-
-	card, err := openCardTx(ctx, tx, userID, name, designID)
-	if err != nil {
-		return Card{}, err
-	}
-	return card, tx.Commit(ctx)
-}
-
-func openCardTx(ctx context.Context, tx pgx.Tx, userID int, name string, designID int) (Card, error) {
+func openCardTx(ctx context.Context, tx pgx.Tx, userID int, name string, choice DesignChoice) (Card, error) {
 	// Блокировка пользователя работает и до открытия первого счёта.
 	if err := lockUser(ctx, tx, userID); err != nil {
 		return Card{}, err
@@ -126,16 +109,25 @@ func openCardTx(ctx context.Context, tx pgx.Tx, userID int, name string, designI
 			return Card{}, err
 		}
 		var card Card
+		var customRaw []byte
 		err = tx.QueryRow(ctx, `
-			INSERT INTO bank_cards (user_id, tier, name, design_id, card_number, balance, is_active_for_trading)
-			VALUES ($1, 'standard', $2, $3, $4, 0, false)
+			INSERT INTO bank_cards (user_id, tier, name, design_id, design_key, custom, card_number, balance, is_active_for_trading)
+			VALUES ($1, 'standard', $2, $3, $4, $5, $6, 0, false)
 			ON CONFLICT (card_number) DO NOTHING
-			RETURNING id, user_id, tier, name, design_id, card_number, balance, is_active_for_trading, opened_at;
-		`, userID, name, designID, cardNumber).Scan(&card.ID, &card.UserID, &card.Tier, &card.Name, &card.DesignID, &card.CardNumber, &card.Balance, &card.IsActiveForTrading, &card.OpenedAt)
+			RETURNING id, user_id, tier, name, design_id, design_key, custom, card_number, balance, is_active_for_trading, opened_at;
+		`, userID, name, choice.DesignID, nullIfEmpty(choice.DesignKey), customJSON(choice.Custom), cardNumber).Scan(
+			&card.ID, &card.UserID, &card.Tier, &card.Name, &card.DesignID, &card.DesignKey, &customRaw, &card.CardNumber,
+			&card.Balance, &card.IsActiveForTrading, &card.OpenedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
-		return card, err
+		if err != nil {
+			return Card{}, err
+		}
+		if card.Custom, err = scanCustom(customRaw); err != nil {
+			return Card{}, err
+		}
+		return card, nil
 	}
 	return Card{}, errors.New("could not generate a unique card number")
 }

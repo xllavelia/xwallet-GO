@@ -147,33 +147,6 @@ func TestBattlepassHistoryDoesNotInventCosmetics(t *testing.T) {
 			}
 		}
 	}
-	for _, test := range []struct {
-		level int
-		track string
-		id    string
-	}{{25, "free", "theme-sage"}, {25, "pass", "theme-dusk"}, {40, "free", "emblem-fox"}, {40, "pass", "theme-gold"}, {50, "pass", "emblem-crown"}} {
-		events, err := battlepassActivityEvents(5, 2, "Season 2", test.level, test.track, at)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var found bool
-		for _, event := range events {
-			if event.Asset != "cosmetic" {
-				continue
-			}
-			found = true
-			facts := map[string]string{}
-			for _, fact := range event.Facts {
-				facts[fact.Label] = fact.Value
-			}
-			if event.Amount != 1 || event.Kind != "cosmetic" || facts["Cosmetic"] != test.id || facts["Outcome"] != "Status or duplicate conversion not recorded" || strings.HasSuffix(facts["Reward"], " status") {
-				t.Fatalf("legacy status history lost mapping/uncertainty: %+v", event)
-			}
-		}
-		if !found {
-			t.Fatalf("legacy status event lost at %d/%s", test.level, test.track)
-		}
-	}
 }
 
 func TestCaseUsesPersistedConversions(t *testing.T) {
@@ -188,12 +161,12 @@ func TestCaseUsesPersistedConversions(t *testing.T) {
 		{"lavx", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "lavx", Value: 10}, Granted: "10 LAVX"}, "LAVX", "payout", 10},
 		{"ref", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "ref", Value: 80}, Granted: "80 REF XP"}, "REF XP", "payout", 80},
 		{"fee voucher", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "fee", Value: 100}, Granted: "$100 fee · 5d"}, "voucher", "voucher_issued", 100},
-		{"status", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Value: 2000}, Granted: "Owner status"}, "cosmetic", "cosmetic", 1},
+		{"status", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Value: 2000}, Granted: "Owner status"}, "cosmetic", "cosmetic", 1},
 		{"cosmetic", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "cosmetic", Cosmetic: "pattern-waves"}, Cosmetic: "pattern-waves", Granted: "Waves pattern"}, "cosmetic", "cosmetic", 1},
 		{"cosmetic not cash", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "cosmetic", Cosmetic: "emblem-eclipse", Value: 2000}, Granted: "Eclipse emblem"}, "cosmetic", "cosmetic", 1},
-		{"mapped duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Cosmetic: "theme-supernova"}, Note: "duplicate Owner status → $2000", Granted: "duplicate Owner status → $2000"}, "USD", "payout", 2000},
-		{"duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "owner", Value: 2000}, Note: "duplicate Owner status → $17.5", Granted: "duplicate Owner status → $17.5"}, "USD", "payout", 17.5},
-		{"duplicate granted", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Status: "gold"}, Granted: "duplicate Gold status → $42"}, "USD", "payout", 42},
+		{"mapped duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Cosmetic: "theme-supernova"}, Note: "duplicate Owner status → $2000", Granted: "duplicate Owner status → $2000"}, "USD", "payout", 2000},
+		{"duplicate note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status", Value: 2000}, Note: "duplicate Owner status → $17.5", Granted: "duplicate Owner status → $17.5"}, "USD", "payout", 17.5},
+		{"duplicate granted", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "status"}, Granted: "duplicate Gold status → $42"}, "USD", "payout", 42},
 		{"full slots note", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "fee", Value: 100}, Note: "$147.3 fee · 5d added as cash (voucher slots full)", Granted: "$147.3 fee · 5d added as cash (voucher slots full)"}, "USD", "payout", 147.3},
 		{"full slots granted", battlepass_sql.BPCaseRoll{Entry: battlepass_sql.BPCaseEntry{Kind: "fee", Value: 20}, Granted: "$31 fee · 4d added as cash (voucher slots full)"}, "USD", "payout", 31},
 	} {
@@ -229,8 +202,6 @@ func TestCaseCosmeticFactsUseStoredItem(t *testing.T) {
 	}{
 		{`{"entry":{"kind":"cosmetic","cosmetic":"pattern-waves","display":"Waves pattern"},"cosmetic":"pattern-waves","granted":"Waves pattern"}`, "pattern-waves", "cosmetic", 1},
 		{`{"entry":{"kind":"cosmetic","display":"Eclipse emblem"},"cosmetic":"emblem-eclipse","granted":"Eclipse emblem"}`, "emblem-eclipse", "cosmetic", 1},
-		{`{"entry":{"kind":"status","status":"owner","value":2000},"granted":"Owner status"}`, "theme-supernova", "cosmetic", 1},
-		{`{"entry":{"kind":"status","status":"owner","cosmetic":"theme-supernova"},"note":"duplicate Owner status → $2000","granted":"duplicate Owner status → $2000"}`, "theme-supernova", "USD", 2000},
 	} {
 		tx := &activityFixtureTx{sets: [][][]any{{{int64(91), "rare", []byte(test.raw), at, 10, "free", "Season 1"}}}}
 		response := newActivityResponse()

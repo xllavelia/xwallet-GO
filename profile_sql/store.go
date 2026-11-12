@@ -61,9 +61,7 @@ func readAccount(ctx context.Context, q queryer, player string, lock bool, viewe
 	return a, nil
 }
 
-const ownershipSQL = `SELECT cosmetic_id FROM user_cosmetics WHERE user_id=$1
-UNION SELECT l.cosmetic_id FROM user_statuses s
-JOIN profile_legacy_cosmetics l ON l.status=lower(btrim(s.status)) WHERE s.user_id=$1`
+const ownershipSQL = `SELECT cosmetic_id FROM user_cosmetics WHERE user_id=$1`
 
 func ownership(ctx context.Context, q queryer, userID int) (map[string]bool, error) {
 	rows, err := q.Query(ctx, ownershipSQL, userID)
@@ -82,24 +80,12 @@ func ownership(ctx context.Context, q queryer, userID int) (map[string]bool, err
 	return owned, rows.Err()
 }
 
-// Фиксированные идентификаторы исключают SQL-инъекции через данные запроса.
-func cosmeticAccessSQL(alias string) string {
-	return `(u.is_admin OR ` + alias + `.source='starter'
-OR (NOT ` + alias + `.admin_only AND (
-EXISTS (SELECT 1 FROM user_cosmetics uc WHERE uc.user_id=u.id AND uc.cosmetic_id=` + alias + `.id)
-OR EXISTS (SELECT 1 FROM user_statuses us JOIN profile_legacy_cosmetics lc ON lc.status=lower(btrim(us.status))
-WHERE us.user_id=u.id AND lc.cosmetic_id=` + alias + `.id))))`
-}
-
 func publicColumns(thumb bool) string {
 	avatar := "p.avatar"
 	if thumb {
 		avatar = "p.avatar_thumb"
 	}
-	return `u.id,u.player_id,u.username,COALESCE(p.bio,''),` + avatar + `,
-CASE WHEN ct.kind='theme' AND ` + cosmeticAccessSQL("ct") + ` THEN ct.id ELSE 'theme-tide' END,
-CASE WHEN ce.kind='emblem' AND ` + cosmeticAccessSQL("ce") + ` THEN ce.id ELSE 'emblem-none' END,
-CASE WHEN cp.kind='pattern' AND ` + cosmeticAccessSQL("cp") + ` THEN cp.id ELSE 'pattern-orbit' END,
+	return `u.id,u.player_id,u.username,COALESCE(p.bio,''),` + avatar + `,p.banner,
 u.is_admin,u.created_at,COALESCE(p.show_balance,true),
 CASE WHEN COALESCE(p.show_balance,true) THEN w.balance::double precision ELSE NULL END,
 f.requester_id,f.state`
@@ -108,9 +94,6 @@ f.requester_id,f.state`
 const publicJoins = ` FROM users u
 LEFT JOIN user_profiles p ON p.user_id=u.id
 LEFT JOIN wallets w ON w.user_id=u.id
-LEFT JOIN profile_cosmetic_catalog ct ON ct.id=COALESCE(p.theme_id,'theme-tide')
-LEFT JOIN profile_cosmetic_catalog ce ON ce.id=COALESCE(p.emblem_id,'emblem-none')
-LEFT JOIN profile_cosmetic_catalog cp ON cp.id=COALESCE(p.pattern_id,'pattern-orbit')
 LEFT JOIN community_friendships f ON f.user_low=LEAST(u.id,$1::integer) AND f.user_high=GREATEST(u.id,$1::integer)`
 
 type scanner interface{ Scan(...any) error }
@@ -119,9 +102,10 @@ func scanPublic(row scanner, viewerID int, rank *int) (PublicProfile, error) {
 	var p PublicProfile
 	var id int
 	var avatar []byte
+	var banner []byte
 	var requester *int
 	var state *string
-	args := []any{&id, &p.PlayerID, &p.Username, &p.Bio, &avatar, &p.ThemeID, &p.EmblemID, &p.PatternID,
+	args := []any{&id, &p.PlayerID, &p.Username, &p.Bio, &avatar, &banner,
 		&p.IsAdmin, &p.CreatedAt, &p.ShowBalance, &p.Balance, &requester, &state}
 	if rank != nil {
 		args = append(args, rank)
@@ -131,6 +115,9 @@ func scanPublic(row scanner, viewerID int, rank *int) (PublicProfile, error) {
 	}
 	if len(avatar) > 0 {
 		p.AvatarURL = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(avatar)
+	}
+	if len(banner) > 0 {
+		p.BannerURL = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(banner)
 	}
 	if !p.ShowBalance {
 		p.Balance = nil // Скрываем баланс даже при ошибке в SQL-проекции.
@@ -165,9 +152,6 @@ func ownState(ctx context.Context, q queryer, a account) (OwnState, error) {
 	if err != nil {
 		return s, err
 	}
-	p.ThemeID = displayCosmetic(p.ThemeID, "theme", DefaultTheme, owned, p.IsAdmin)
-	p.EmblemID = displayCosmetic(p.EmblemID, "emblem", DefaultEmblem, owned, p.IsAdmin)
-	p.PatternID = displayCosmetic(p.PatternID, "pattern", DefaultPattern, owned, p.IsAdmin)
 	s.Profile = p
 	s.Catalog = CatalogFor(owned, p.IsAdmin)
 	return s, nil
@@ -272,29 +256,6 @@ AND (lower(username)=lower($2) OR player_id=$2))`, a.id, in.Username).Scan(&take
 	})
 }
 
-func (s *Store) Equip(ctx context.Context, player string, in EquipInput) (OwnState, error) {
-	if err := ValidateEquip(in); err != nil {
-		return OwnState{}, err
-	}
-	return s.mutate(ctx, player, func(tx pgx.Tx, a account) error {
-		owned, err := ownership(ctx, tx, a.id)
-		if err != nil {
-			return err
-		}
-		for _, id := range []string{in.ThemeID, in.EmblemID, in.PatternID} {
-			if !HasCosmetic(id, owned, a.isAdmin) {
-				return ErrNotOwned
-			}
-		}
-		if err := ensureProfile(ctx, tx, a.id); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `UPDATE user_profiles SET theme_id=$2,emblem_id=$3,pattern_id=$4,updated_at=now() WHERE user_id=$1`,
-			a.id, in.ThemeID, in.EmblemID, in.PatternID)
-		return err
-	})
-}
-
 const lockWalletSQL = `SELECT lavx_balance::double precision FROM wallets WHERE user_id=$1 FOR UPDATE`
 const debitWalletSQL = `UPDATE wallets SET lavx_balance=lavx_balance-$2,updated_at=now()
 WHERE user_id=$1 AND lavx_balance >= $2`
@@ -366,6 +327,26 @@ func (s *Store) SetAvatar(ctx context.Context, player string, avatar, thumb []by
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE user_profiles SET avatar=$2,avatar_thumb=$3,updated_at=now() WHERE user_id=$1`, a.id, avatar, thumb)
+		return err
+	})
+}
+
+// Метаданные очищает profile_http.ProcessBanner: широкое JPEG до 200 КБ.
+func (s *Store) SetBanner(ctx context.Context, player string, banner []byte) (OwnState, error) {
+	if len(banner) > 200*1024 {
+		return OwnState{}, ErrInvalid
+	}
+	if len(banner) > 0 && (len(banner) < 3 || banner[0] != 0xff || banner[1] != 0xd8 || banner[2] != 0xff) {
+		return OwnState{}, ErrInvalid
+	}
+	if len(banner) == 0 {
+		banner = nil
+	}
+	return s.mutate(ctx, player, func(tx pgx.Tx, a account) error {
+		if err := ensureProfile(ctx, tx, a.id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE user_profiles SET banner=$2,updated_at=now() WHERE user_id=$1`, a.id, banner)
 		return err
 	})
 }

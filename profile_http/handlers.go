@@ -18,10 +18,10 @@ import (
 type service interface {
 	Own(context.Context, string) (profile_sql.OwnState, error)
 	Update(context.Context, string, profile_sql.UpdateInput) (profile_sql.OwnState, error)
-	Equip(context.Context, string, profile_sql.EquipInput) (profile_sql.OwnState, error)
 	Purchase(context.Context, string, string) (profile_sql.OwnState, error)
 	View(context.Context, string, string) (profile_sql.PublicProfile, error)
 	SetAvatar(context.Context, string, []byte, []byte) (profile_sql.OwnState, error)
+	SetBanner(context.Context, string, []byte) (profile_sql.OwnState, error)
 	Community(context.Context, string) (profile_sql.CommunityState, error)
 	Search(context.Context, string, string) ([]profile_sql.PublicProfile, error)
 	Friend(context.Context, string, string, string) (profile_sql.Relationship, error)
@@ -37,8 +37,8 @@ func register(mux *http.ServeMux, store service) {
 	h := handlers{store: store}
 	for path, handler := range map[string]http.HandlerFunc{
 		"/profile": h.profile, "/profile/update": h.update,
-		"/profile/equip": h.equip, "/profile/purchase": h.purchase,
-		"/profile/view": h.view, "/profile/avatar": h.avatar,
+		"/profile/purchase": h.purchase,
+		"/profile/view": h.view, "/profile/avatar": h.avatar, "/profile/banner": h.banner,
 		"/community": h.community, "/community/search": h.search,
 		"/community/friend": h.friend,
 	} {
@@ -56,9 +56,9 @@ func respond(w http.ResponseWriter, value any) {
 func respondError(w http.ResponseWriter, err error) {
 	status, message := http.StatusInternalServerError, "could not complete request"
 	switch {
-	case errors.Is(err, profile_sql.ErrInvalid), errors.Is(err, ErrAvatarInvalid):
+	case errors.Is(err, profile_sql.ErrInvalid), errors.Is(err, ErrAvatarInvalid), errors.Is(err, ErrBannerInvalid):
 		status, message = http.StatusBadRequest, err.Error()
-	case errors.Is(err, ErrAvatarTooLarge):
+	case errors.Is(err, ErrAvatarTooLarge), errors.Is(err, ErrBannerTooLarge):
 		status, message = http.StatusRequestEntityTooLarge, err.Error()
 	case errors.Is(err, profile_sql.ErrUnauthorized):
 		status, message = http.StatusUnauthorized, err.Error()
@@ -178,27 +178,6 @@ func (h handlers) update(w http.ResponseWriter, r *http.Request) {
 	respond(w, state)
 }
 
-func (h handlers) equip(w http.ResponseWriter, r *http.Request) {
-	player, ok := playerFor(w, r, http.MethodPost)
-	if !ok {
-		return
-	}
-	var in profile_sql.EquipInput
-	if !decodeRequest(w, r, 8*1024, &in) {
-		return
-	}
-	if err := profile_sql.ValidateEquip(in); err != nil {
-		respondError(w, err)
-		return
-	}
-	state, err := h.store.Equip(r.Context(), player, in)
-	if err != nil {
-		respondError(w, err)
-		return
-	}
-	respond(w, state)
-}
-
 func (h handlers) purchase(w http.ResponseWriter, r *http.Request) {
 	player, ok := playerFor(w, r, http.MethodPost)
 	if !ok {
@@ -266,6 +245,34 @@ func (h handlers) avatar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	state, err := h.store.SetAvatar(r.Context(), player, avatar, thumb)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, state)
+}
+
+func (h handlers) banner(w http.ResponseWriter, r *http.Request) {
+	player, ok := playerFor(w, r, http.MethodPost, http.MethodDelete)
+	if !ok {
+		return
+	}
+	var banner []byte
+	if r.Method == http.MethodPost {
+		var req struct {
+			Image string `json:"image"`
+		}
+		if !decodeRequest(w, r, BannerMaxRequestBytes, &req) {
+			return
+		}
+		var err error
+		banner, err = ProcessBanner(req.Image)
+		if err != nil {
+			respondError(w, err)
+			return
+		}
+	}
+	state, err := h.store.SetBanner(r.Context(), player, banner)
 	if err != nil {
 		respondError(w, err)
 		return

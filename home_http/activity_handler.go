@@ -14,7 +14,6 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
-	"xwallet-server/profile_sql"
 	"xwallet-server/rewards_sql"
 
 	"github.com/jackc/pgx/v5"
@@ -232,7 +231,12 @@ func battlepassRewardAmount(reward battlepass_sql.BPReward) (string, string, flo
 		return "voucher", "voucher_issued", math.Abs(reward.Value), nil
 	case "case":
 		return "case", "case_issued", 1, nil
-	case "status", "cosmetic":
+	case "cosmetic":
+		return "cosmetic", "cosmetic", 1, nil
+	case "custom":
+		return "voucher", "voucher_issued", 0, nil
+	case "status":
+		// Легаси-записи старых кейсов: статусы больше не выдаются, но история отображается.
 		return "cosmetic", "cosmetic", 1, nil
 	default:
 		return "", "", 0, fmt.Errorf("unknown battle pass reward %q", reward.Kind)
@@ -265,10 +269,6 @@ func battlepassActivityEvents(userID int, seasonID int64, season string, level i
 		}
 		facts := []activityFact{activityFactFor("Season", season), activityFactFor("Level", strconv.Itoa(level)),
 			activityFactFor("Track", track), activityFactFor("Reward", battlepass_sql.BPFormatReward(reward))}
-		if reward.Kind == "status" {
-			facts = append(facts, activityFactFor("Cosmetic", reward.Cosmetic),
-				activityFactFor("Outcome", "Status or duplicate conversion not recorded"))
-		}
 		events = append(events, makeActivityEvent(fmt.Sprintf("bp:claim:%d:%d:%d:%s:%d", userID, seasonID, level, track, i),
 			"battlepass", kind, fmt.Sprintf("Level %d reward", level),
 			asset, amount, at, facts...))
@@ -346,7 +346,7 @@ func caseActivityAmount(roll battlepass_sql.BPCaseRoll) (string, string, float64
 		return "", "", 0, fmt.Errorf("unknown stored case note %q", roll.Note)
 	}
 	asset, kind, amount, err := battlepassRewardAmount(battlepass_sql.BPReward{
-		Kind: roll.Entry.Kind, Value: roll.Entry.Value, Status: roll.Entry.Status,
+		Kind: roll.Entry.Kind, Value: roll.Entry.Value, Voucher: roll.Entry.Voucher,
 		Cosmetic: roll.Entry.Cosmetic, CosmeticKind: roll.Entry.CosmeticKind,
 	})
 	if kind == "reward" {
@@ -379,17 +379,14 @@ func loadCaseActivity(ctx context.Context, tx pgx.Tx, userID int, response *acti
 		}
 		facts := []activityFact{activityFactFor("Season", season), activityFactFor("Rarity", rarity), activityFactFor("Level", strconv.Itoa(level)),
 			activityFactFor("Track", track), activityFactFor("Granted", roll.Granted)}
-		if roll.Entry.Kind == "cosmetic" || roll.Entry.Kind == "status" {
+		if roll.Entry.Kind == "cosmetic" {
 			cosmeticID := roll.Entry.Cosmetic
 			if cosmeticID == "" {
 				cosmeticID = roll.Cosmetic
 			}
-			if roll.Entry.Kind == "status" {
-				cosmeticID = profile_sql.LegacyCosmetic(roll.Entry.Status)
-			}
 			facts = append(facts, activityFactFor("Cosmetic", cosmeticID),
 				activityFactFor("Reward", battlepass_sql.BPFormatReward(battlepass_sql.BPReward{
-					Kind: roll.Entry.Kind, Cosmetic: cosmeticID, Status: roll.Entry.Status,
+					Kind: roll.Entry.Kind, Cosmetic: cosmeticID,
 					Display: roll.Entry.Display,
 				})))
 		}

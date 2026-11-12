@@ -44,14 +44,6 @@ func TestProfileValidation(t *testing.T) {
 	if escapeSearch(`a%_\b`) != `a\%\_\\b` {
 		t.Fatal("LIKE wildcard not escaped")
 	}
-	if ValidateEquip(EquipInput{DefaultTheme, DefaultEmblem, DefaultPattern}) != nil {
-		t.Fatal("defaults invalid")
-	}
-	for _, in := range []EquipInput{{"tide", DefaultEmblem, DefaultPattern}, {"emblem-fox", DefaultEmblem, DefaultPattern}, {DefaultTheme, "", DefaultPattern}} {
-		if ValidateEquip(in) == nil {
-			t.Fatalf("bad equip: %+v", in)
-		}
-	}
 }
 
 func TestNewsPlainText(t *testing.T) {
@@ -123,11 +115,11 @@ func TestSQLGuards(t *testing.T) {
 			t.Fatal(fragment)
 		}
 	}
-	if !strings.Contains(ownershipSQL, "user_statuses") || !strings.Contains(ownershipSQL, "profile_legacy_cosmetics") {
-		t.Fatal("legacy grants missing")
+	if !strings.Contains(ownershipSQL, "FROM user_cosmetics") || strings.Contains(ownershipSQL, "user_statuses") {
+		t.Fatal("ownership source changed")
 	}
-	if !strings.Contains(seedNewsSQL, "ON CONFLICT (id) DO NOTHING") {
-		t.Fatal("seed republishes")
+	if !strings.Contains(seedNewsSQL, "ON CONFLICT (id) DO UPDATE") {
+		t.Fatal("seed no longer refreshes")
 	}
 	if !strings.Contains(publicColumns(false), "CASE WHEN COALESCE(p.show_balance,true) THEN w.balance") {
 		t.Fatal("privacy absent from SQL")

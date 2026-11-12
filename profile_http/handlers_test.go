@@ -21,13 +21,14 @@ type stubService struct {
 	player        string
 	update        profile_sql.UpdateInput
 	avatar, thumb []byte
+	banner        []byte
 	err           error
 }
 
 func (s *stubService) touch(player string) { s.calls++; s.player = player }
 func (s *stubService) state() profile_sql.OwnState {
-	return profile_sql.OwnState{Profile: profile_sql.PublicProfile{PlayerID: "123456", Username: "LiveName", Bio: "", ThemeID: profile_sql.DefaultTheme,
-		EmblemID: profile_sql.DefaultEmblem, PatternID: profile_sql.DefaultPattern, ShowBalance: false, FriendState: "self", IsAdmin: false},
+	return profile_sql.OwnState{Profile: profile_sql.PublicProfile{PlayerID: "123456", Username: "LiveName", Bio: "",
+		ShowBalance: false, FriendState: "self", IsAdmin: false},
 		Catalog: profile_sql.CatalogFor(nil, false), LavxBalance: 100}
 }
 func (s *stubService) Own(_ context.Context, p string) (profile_sql.OwnState, error) {
@@ -37,10 +38,6 @@ func (s *stubService) Own(_ context.Context, p string) (profile_sql.OwnState, er
 func (s *stubService) Update(_ context.Context, p string, in profile_sql.UpdateInput) (profile_sql.OwnState, error) {
 	s.touch(p)
 	s.update = in
-	return s.state(), s.err
-}
-func (s *stubService) Equip(_ context.Context, p string, in profile_sql.EquipInput) (profile_sql.OwnState, error) {
-	s.touch(p)
 	return s.state(), s.err
 }
 func (s *stubService) Purchase(_ context.Context, p, id string) (profile_sql.OwnState, error) {
@@ -57,6 +54,11 @@ func (s *stubService) View(_ context.Context, p, target string) (profile_sql.Pub
 func (s *stubService) SetAvatar(_ context.Context, p string, a, thumb []byte) (profile_sql.OwnState, error) {
 	s.touch(p)
 	s.avatar, s.thumb = a, thumb
+	return s.state(), s.err
+}
+func (s *stubService) SetBanner(_ context.Context, p string, b []byte) (profile_sql.OwnState, error) {
+	s.touch(p)
+	s.banner = b
 	return s.state(), s.err
 }
 func (s *stubService) Community(_ context.Context, p string) (profile_sql.CommunityState, error) {
@@ -99,7 +101,7 @@ func perform(mux *http.ServeMux, token, method, path, body string) *httptest.Res
 func TestAllRoutesRequireAuthAndMethods(t *testing.T) {
 	s := &stubService{}
 	mux, token := testMux(t, s)
-	for path, method := range map[string]string{"/profile": "GET", "/profile/update": "POST", "/profile/equip": "POST", "/profile/purchase": "POST", "/profile/view?playerId=654321": "GET", "/profile/avatar": "POST", "/community": "GET", "/community/search?q=ab": "GET", "/community/friend": "POST"} {
+	for path, method := range map[string]string{"/profile": "GET", "/profile/update": "POST", "/profile/purchase": "POST", "/profile/view?playerId=654321": "GET", "/profile/avatar": "POST", "/profile/banner": "POST", "/community": "GET", "/community/search?q=ab": "GET", "/community/friend": "POST"} {
 		if w := perform(mux, "", method, path, ""); w.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated %s %d", path, w.Code)
 		}
@@ -127,14 +129,14 @@ func TestHTTPValidationAndIDImmutability(t *testing.T) {
 		{"/profile/update", `{"username":"Player","bio":"","showBalance":true} {}`, 400},
 		{"/profile/update", "null", 400},
 		{"/profile/update", string([]byte{'{', 0xff, '}'}), 400},
-		{"/profile/equip", `{"themeId":"tide","emblemId":"emblem-none","patternId":"pattern-orbit"}`, 400},
-		{"/profile/equip", `{"themeId":"emblem-fox","emblemId":"emblem-none","patternId":"pattern-orbit"}`, 400},
-		{"/profile/purchase", `{"cosmeticId":"theme-xlavelia"}`, 409},
-		{"/profile/purchase", `{"cosmeticId":"theme-sage"}`, 409},
-		{"/profile/purchase", `{"cosmeticId":"theme-silk","price":0}`, 400},
+		{"/profile/purchase", `{"cosmeticId":"card-xlavelia"}`, 409},
+		{"/profile/purchase", `{"cosmeticId":"card-sage"}`, 409},
+		{"/profile/purchase", `{"cosmeticId":"card-silk","price":0}`, 400},
 		{"/profile/purchase", `{"cosmeticId":"unknown"}`, 400},
 		{"/profile/avatar", `{"image":"https://example.com/a.jpg"}`, 400},
 		{"/profile/avatar", strings.Repeat(" ", AvatarMaxRequestBytes+1), 413},
+		{"/profile/banner", `{"image":"https://example.com/b.jpg"}`, 400},
+		{"/profile/banner", strings.Repeat(" ", BannerMaxRequestBytes+1), 413},
 		{"/profile/view?playerId=not-valid", "", 400},
 		{"/community/search?q=a", "", 400},
 		{"/community/friend", `{"playerId":"654321","action":"message"}`, 400},
@@ -159,8 +161,8 @@ func TestHTTPResponseShapesAndJWTNotAuthoritative(t *testing.T) {
 	mux, token := testMux(t, s)
 	for _, tc := range []struct{ method, path, body string }{
 		{"GET", "/profile", ""}, {"POST", "/profile/update", `{"username":"NewName","bio":"","showBalance":false}`},
-		{"POST", "/profile/equip", `{"themeId":"theme-tide","emblemId":"emblem-none","patternId":"pattern-orbit"}`},
-		{"POST", "/profile/purchase", `{"cosmeticId":"theme-silk"}`}, {"DELETE", "/profile/avatar", ""},
+		{"POST", "/profile/purchase", `{"cosmeticId":"card-silk"}`}, {"DELETE", "/profile/avatar", ""},
+		{"DELETE", "/profile/banner", ""},
 	} {
 		w := perform(mux, token, tc.method, tc.path, tc.body)
 		if w.Code != 200 {
@@ -223,6 +225,20 @@ func TestHTTPAvatarUploadAndDelete(t *testing.T) {
 	w = perform(mux, token, "DELETE", "/profile/avatar", "")
 	if w.Code != 200 || s.avatar != nil || s.thumb != nil {
 		t.Fatal("avatar delete failed")
+	}
+}
+
+func TestHTTPBannerUploadAndDelete(t *testing.T) {
+	s := &stubService{}
+	mux, token := testMux(t, s)
+	body, _ := json.Marshal(map[string]string{"image": imageURL(t, "png", image.NewNRGBA(image.Rect(0, 0, 300, 100)))})
+	w := perform(mux, token, "POST", "/profile/banner", string(body))
+	if w.Code != 200 || len(s.banner) == 0 {
+		t.Fatal("banner upload failed", w.Code, w.Body.String())
+	}
+	w = perform(mux, token, "DELETE", "/profile/banner", "")
+	if w.Code != 200 || s.banner != nil {
+		t.Fatal("banner delete failed")
 	}
 }
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"xwallet-server/bankcards_sql"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -46,7 +44,7 @@ func ClaimCreditVoucher(ctx context.Context, pool *pgxpool.Pool, id int, userID 
 		return "", 0, err
 	}
 
-	if err := bankcards_sql.LogVoucherClaim(ctx, tx, userID, voucherType, amount, originSource); err != nil {
+	if err := LogVoucherClaim(ctx, tx, userID, voucherType, amount, originSource); err != nil {
 		return "", 0, err
 	}
 

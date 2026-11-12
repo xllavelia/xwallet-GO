@@ -314,6 +314,8 @@ func main() {
 	http.HandleFunc("/bankcards", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ListHandler(pool))))
 	http.HandleFunc("/bankcards/open", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.OpenHandler(pool))))
 	http.HandleFunc("/bankcards/topup", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.TopUpHandler(pool))))
+	http.HandleFunc("/bankcards/design", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.DesignHandler(pool))))
+	http.HandleFunc("/bankcards/custom/charge", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CustomChargeHandler(pool))))
 	http.HandleFunc("/bankcards/select-active", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.SelectActiveHandler(pool))))
 	http.HandleFunc("/bankcards/close", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.CloseHandler(pool))))
 	http.HandleFunc("/bankcards/resolve", auth_http.WithCORS(auth_http.RequireAuth(bankcards_http.ResolveHandler(pool))))

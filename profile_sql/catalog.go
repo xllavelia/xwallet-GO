@@ -7,69 +7,55 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Cosmetic описывает дизайны карточек: цвет левой части и цвет текста.
 type Cosmetic struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Rarity    string `json:"rarity"`
-	Source    string `json:"source"`
-	Price     int    `json:"price"`
-	Level     int    `json:"level,omitempty"`
-	Track     string `json:"track,omitempty"`
-	AdminOnly bool   `json:"adminOnly,omitempty"`
-	Owned     bool   `json:"owned"`
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	Name      string   `json:"name"`
+	Rarity    string   `json:"rarity"`
+	Source    string   `json:"source"`
+	Price     int      `json:"price"`
+	Level     int      `json:"level,omitempty"`
+	Track     string   `json:"track,omitempty"`
+	AdminOnly bool     `json:"adminOnly,omitempty"`
+	Colors    []string `json:"colors,omitempty"`
+	Owned     bool     `json:"owned"`
 }
 
-const (
-	DefaultTheme   = "theme-tide"
-	DefaultEmblem  = "emblem-none"
-	DefaultPattern = "pattern-orbit"
-)
+// CardDesignColors возвращает [цвет левой части, цвет текста] для дизайна карточки.
+func CardDesignColors(id string) ([2]string, bool) {
+	var out [2]string
+	c, ok := GetCosmetic(id)
+	if !ok || c.Kind != "card" || len(c.Colors) < 2 {
+		return out, false
+	}
+	out[0], out[1] = c.Colors[0], c.Colors[1]
+	return out, true
+}
 
 var cosmetics = []Cosmetic{
-	{ID: "theme-graphite", Kind: "theme", Name: "Graphite", Rarity: "common", Source: "starter"},
-	{ID: "theme-tide", Kind: "theme", Name: "Tide", Rarity: "common", Source: "starter"},
-	{ID: "theme-sage", Kind: "theme", Name: "Sage", Rarity: "common", Source: "battlepass", Level: 5, Track: "free"},
-	{ID: "theme-coral", Kind: "theme", Name: "Coral", Rarity: "rare", Source: "battlepass", Level: 12, Track: "free"},
-	{ID: "theme-glacier", Kind: "theme", Name: "Glacier", Rarity: "epic", Source: "battlepass", Level: 20, Track: "free"},
-	{ID: "theme-dusk", Kind: "theme", Name: "Dusk", Rarity: "rare", Source: "battlepass", Level: 8, Track: "pass"},
-	{ID: "theme-aurora", Kind: "theme", Name: "Aurora", Rarity: "epic", Source: "battlepass", Level: 18, Track: "pass"},
-	{ID: "theme-ember", Kind: "theme", Name: "Ember", Rarity: "legendary", Source: "battlepass", Level: 32, Track: "pass"},
-	{ID: "theme-prism", Kind: "theme", Name: "Prism", Rarity: "chromatic", Source: "battlepass", Level: 45, Track: "pass"},
-	{ID: "theme-silver", Kind: "theme", Name: "Silver", Rarity: "rare", Source: "case"},
-	{ID: "theme-gold", Kind: "theme", Name: "Gold", Rarity: "epic", Source: "case"},
-	{ID: "theme-platinum", Kind: "theme", Name: "Platinum", Rarity: "legendary", Source: "case"},
-	{ID: "theme-supernova", Kind: "theme", Name: "Supernova", Rarity: "chromatic", Source: "case"},
-	{ID: "theme-cocoa", Kind: "theme", Name: "Cocoa", Rarity: "rare", Source: "case"},
-	{ID: "theme-olive", Kind: "theme", Name: "Olive", Rarity: "rare", Source: "case"},
-	{ID: "theme-silk", Kind: "theme", Name: "Silk", Rarity: "rare", Source: "shop", Price: 50},
-	{ID: "theme-nebula", Kind: "theme", Name: "Nebula", Rarity: "epic", Source: "shop", Price: 100},
-	{ID: "theme-iridescent", Kind: "theme", Name: "Iridescent", Rarity: "chromatic", Source: "shop", Price: 200},
-	{ID: "theme-xlavelia", Kind: "theme", Name: "Xlavelia", Rarity: "exclusive", Source: "admin", AdminOnly: true},
-	{ID: "theme-wave", Kind: "theme", Name: "Wave", Rarity: "exclusive", Source: "admin", AdminOnly: true},
-	{ID: "emblem-none", Kind: "emblem", Name: "None", Rarity: "common", Source: "starter"},
-	{ID: "emblem-spark", Kind: "emblem", Name: "Spark", Rarity: "common", Source: "starter"},
-	{ID: "emblem-comet", Kind: "emblem", Name: "Comet", Rarity: "rare", Source: "battlepass", Level: 15, Track: "free"},
-	{ID: "emblem-crystal", Kind: "emblem", Name: "Crystal", Rarity: "epic", Source: "battlepass", Level: 10, Track: "pass"},
-	{ID: "emblem-fox", Kind: "emblem", Name: "Fox", Rarity: "common", Source: "case"},
-	{ID: "emblem-crown", Kind: "emblem", Name: "Crown", Rarity: "legendary", Source: "battlepass", Level: 50, Track: "pass"},
-	{ID: "emblem-dragon", Kind: "emblem", Name: "Dragon", Rarity: "legendary", Source: "case"},
-	{ID: "emblem-eclipse", Kind: "emblem", Name: "Eclipse", Rarity: "chromatic", Source: "case"},
-	{ID: "emblem-sigil", Kind: "emblem", Name: "Sigil", Rarity: "exclusive", Source: "admin", AdminOnly: true},
-	{ID: "pattern-none", Kind: "pattern", Name: "None", Rarity: "common", Source: "starter"},
-	{ID: "pattern-orbit", Kind: "pattern", Name: "Orbit", Rarity: "common", Source: "starter"},
-	{ID: "pattern-leaf", Kind: "pattern", Name: "Leaf", Rarity: "common", Source: "battlepass", Level: 10, Track: "free"},
-	{ID: "pattern-waves", Kind: "pattern", Name: "Waves", Rarity: "rare", Source: "case"},
-	{ID: "pattern-spark", Kind: "pattern", Name: "Spark", Rarity: "epic", Source: "battlepass", Level: 14, Track: "pass"},
-	{ID: "pattern-constellation", Kind: "pattern", Name: "Constellation", Rarity: "legendary", Source: "battlepass", Level: 36, Track: "pass"},
-	{ID: "pattern-monogram", Kind: "pattern", Name: "Monogram", Rarity: "exclusive", Source: "admin", AdminOnly: true},
-}
-
-var legacyCosmetics = map[string]string{
-	"lucky": "theme-sage", "valter": "theme-dusk", "chicken_burger": "emblem-fox",
-	"silver": "theme-silver", "gold": "theme-gold", "platinum": "theme-platinum",
-	"legend": "emblem-dragon", "legendary": "emblem-dragon", "owner": "theme-supernova",
-	"first": "emblem-crown", "bronze": "theme-graphite", "diamond": "theme-prism",
+	// Battle Pass: яркие и тусклые дизайны карточек вместо цветов профиля.
+	{ID: "card-sage", Kind: "card", Name: "Sage", Rarity: "common", Source: "battlepass", Level: 5, Track: "free", Colors: []string{"#788b43", "#ffffff"}},
+	{ID: "card-coral", Kind: "card", Name: "Coral", Rarity: "rare", Source: "battlepass", Level: 12, Track: "free", Colors: []string{"#e45d55", "#ffffff"}},
+	{ID: "card-glacier", Kind: "card", Name: "Glacier", Rarity: "epic", Source: "battlepass", Level: 20, Track: "free", Colors: []string{"#75cbdc", "#101010"}},
+	{ID: "card-dusk", Kind: "card", Name: "Dusk", Rarity: "rare", Source: "battlepass", Level: 8, Track: "pass", Colors: []string{"#895b83", "#ffffff"}},
+	{ID: "card-aurora", Kind: "card", Name: "Aurora", Rarity: "epic", Source: "battlepass", Level: 18, Track: "pass", Colors: []string{"#24a879", "#ffffff"}},
+	{ID: "card-ember", Kind: "card", Name: "Ember", Rarity: "legendary", Source: "battlepass", Level: 32, Track: "pass", Colors: []string{"#d8793f", "#ffffff"}},
+	{ID: "card-prism", Kind: "card", Name: "Prism", Rarity: "chromatic", Source: "battlepass", Level: 45, Track: "pass", Colors: []string{"#db65b5", "#ffffff"}},
+	// Кейсы: редкие тона.
+	{ID: "card-silver", Kind: "card", Name: "Silver", Rarity: "rare", Source: "case", Colors: []string{"#c0c7d1", "#101010"}},
+	{ID: "card-gold", Kind: "card", Name: "Gold", Rarity: "epic", Source: "case", Colors: []string{"#e9bd62", "#21180d"}},
+	{ID: "card-platinum", Kind: "card", Name: "Platinum", Rarity: "legendary", Source: "case", Colors: []string{"#e4e5e8", "#20232b"}},
+	{ID: "card-supernova", Kind: "card", Name: "Supernova", Rarity: "chromatic", Source: "case", Colors: []string{"#f05b8b", "#ffffff"}},
+	{ID: "card-cocoa", Kind: "card", Name: "Cocoa", Rarity: "rare", Source: "case", Colors: []string{"#5c4230", "#efe0c9"}},
+	{ID: "card-olive", Kind: "card", Name: "Olive", Rarity: "rare", Source: "case", Colors: []string{"#66703c", "#e6e3c6"}},
+	// Магазин: эксклюзивы за LAVX.
+	{ID: "card-silk", Kind: "card", Name: "Silk", Rarity: "rare", Source: "shop", Price: 50, Colors: []string{"#e5b49e", "#ffffff"}},
+	{ID: "card-nebula", Kind: "card", Name: "Nebula", Rarity: "epic", Source: "shop", Price: 100, Colors: []string{"#9271e9", "#ffffff"}},
+	{ID: "card-iridescent", Kind: "card", Name: "Iridescent", Rarity: "chromatic", Source: "shop", Price: 200, Colors: []string{"#9acbba", "#101010"}},
+	// Командные эксклюзивы, видимые только администраторам.
+	{ID: "card-xlavelia", Kind: "card", Name: "Xlavelia", Rarity: "exclusive", Source: "admin", AdminOnly: true, Colors: []string{"#013e37", "#ffefb3"}},
+	{ID: "card-wave", Kind: "card", Name: "Wave", Rarity: "exclusive", Source: "admin", AdminOnly: true, Colors: []string{"#16324b", "#f3eddd"}},
 }
 
 func Catalog() []Cosmetic { return append([]Cosmetic(nil), cosmetics...) }
@@ -83,10 +69,6 @@ func GetCosmetic(id string) (Cosmetic, bool) {
 	return Cosmetic{}, false
 }
 
-func LegacyCosmetic(status string) string {
-	return legacyCosmetics[strings.ToLower(strings.TrimSpace(status))]
-}
-
 func HasCosmetic(id string, owned map[string]bool, isAdmin bool) bool {
 	c, ok := GetCosmetic(id)
 	if !ok {
@@ -95,7 +77,7 @@ func HasCosmetic(id string, owned map[string]bool, isAdmin bool) bool {
 	if c.AdminOnly {
 		return isAdmin // Явная выдача не сохраняет доступ после отзыва роли администратора.
 	}
-	return isAdmin || c.Source == "starter" || owned[id]
+	return isAdmin || owned[id]
 }
 
 func CatalogFor(owned map[string]bool, isAdmin bool) []Cosmetic {
@@ -134,4 +116,14 @@ func GrantCosmeticTx(ctx context.Context, tx pgx.Tx, userID int, id, source stri
 	}
 	tag, err := tx.Exec(ctx, grantCosmeticSQL, userID, id, source)
 	return tag.RowsAffected() == 1, err
+}
+
+// NormalizeCardDesignKey приводит ключ к каноническому виду и проверяет, что это дизайн карточки.
+func NormalizeCardDesignKey(id string) (string, bool) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	c, ok := GetCosmetic(id)
+	if !ok || c.Kind != "card" {
+		return "", false
+	}
+	return id, true
 }

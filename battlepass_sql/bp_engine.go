@@ -953,33 +953,30 @@ RETURNING id;
 		if _, err := profile_sql.GrantCosmeticTx(ctx, tx, userID, cosmetic.ID, cosmeticSource); err != nil {
 			return 0, "", err
 		}
-	case "status":
-		cosmeticID := profile_sql.LegacyCosmetic(r.Status)
-		if cosmeticID == "" {
-			return 0, "", fmt.Errorf("unknown legacy status %q", r.Status)
+	case "custom":
+		if r.Voucher == "" {
+			return 0, "", fmt.Errorf("invalid custom voucher reward")
 		}
-		tag, err := tx.Exec(ctx, `
-INSERT INTO user_statuses(user_id, status) VALUES ($1, $2)
-ON CONFLICT (user_id, status) DO NOTHING;
-`, userID, r.Status)
-		if err != nil {
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM user_vouchers WHERE user_id = $1;`, userID).Scan(&count); err != nil {
 			return 0, "", err
 		}
-		// Денежная конвертация опирается на старый статус, а не на цвет профиля.
-		if _, err := profile_sql.GrantCosmeticTx(ctx, tx, userID, cosmeticID, cosmeticSource); err != nil {
-			return 0, "", err
-		}
-		if tag.RowsAffected() == 0 {
-			fallback := BPDuplicateStatusCash
-			if r.Value > 0 {
-				fallback = r.Value
+		if count >= BPVoucherSlots {
+			if !convertFull {
+				return 0, "", BPErrVoucherSlotsFull
 			}
 			if _, err := tx.Exec(ctx, `
 UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2;
-`, fallback, userID); err != nil {
+`, BPDuplicateStatusCash, userID); err != nil {
 				return 0, "", err
 			}
-			return 0, fmt.Sprintf("duplicate %s status → $%s", bpStatusLabel(r.Status), bpNum(fallback)), nil
+			return 0, BPFormatReward(r) + " added as cash (voucher slots full)", nil
+		}
+		if err := user_vouchers_sql.GrantCustomVoucherTx(ctx, tx, userID, r.Voucher, cosmeticSource, BPVoucherSlots); err != nil {
+			if errors.Is(err, user_vouchers_sql.ErrSlotsFull) {
+				return 0, "", BPErrVoucherSlotsFull
+			}
+			return 0, "", err
 		}
 	default:
 		return 0, "", fmt.Errorf("unknown reward kind %q", r.Kind)
@@ -1129,15 +1126,9 @@ FOR UPDATE;
 	}
 
 	reward := BPReward{
-		Kind: entry.Kind, Value: entry.Value, Days: entry.Days, Status: entry.Status,
+		Kind: entry.Kind, Value: entry.Value, Days: entry.Days, Voucher: entry.Voucher,
 		Cosmetic: entry.Cosmetic, CosmeticKind: entry.CosmeticKind,
 		Label: entry.Label, Display: entry.Display,
-	}
-	if entry.Kind == "status" {
-		reward.Value = BPStatusFallback[entry.Status]
-		if reward.Value == 0 {
-			reward.Value = BPDuplicateStatusCash
-		}
 	}
 	_, note, err := bpGrantRewardTx(ctx, tx, userID, season.ID, reward, level, track, true)
 	if err != nil {

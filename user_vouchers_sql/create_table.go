@@ -24,7 +24,7 @@ func CreateUserVouchersTable(ctx context.Context, pool *pgxpool.Pool) error {
 		source VARCHAR(16) NOT NULL DEFAULT 'welcome',
 		created_at TIMESTAMP NOT NULL DEFAULT now(),
 
-		CONSTRAINT user_vouchers_type_check CHECK (voucher_type IN ('fee_discount', 'usdt_credit', 'lavx_credit')),
+		CONSTRAINT user_vouchers_type_check CHECK (voucher_type IN ('fee_discount', 'usdt_credit', 'lavx_credit', 'custom_free', 'custom_20', 'custom_50')),
 		CONSTRAINT user_vouchers_status_check CHECK (status IN ('inactive', 'active'))
 	);
 	CREATE INDEX IF NOT EXISTS idx_user_vouchers_user ON user_vouchers (user_id);

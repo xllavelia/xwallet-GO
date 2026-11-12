@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -88,66 +87,5 @@ func TestFriendStoreIdentityAndTransitions(t *testing.T) {
 	}
 	if _, err := (&Store{}).Friend(context.Background(), "123456", "123456", "request"); !errors.Is(err, ErrTransition) {
 		t.Fatal("self friendship allowed")
-	}
-}
-
-func TestEquipRereadsAdminRoleAndChecksOwnership(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		admin   bool
-		owned   []string
-		in      EquipInput
-		wantErr error
-	}{
-		{"starter", false, nil, EquipInput{DefaultTheme, DefaultEmblem, DefaultPattern}, nil},
-		{"legacy-or-explicit", false, []string{"theme-sage"}, EquipInput{"theme-sage", DefaultEmblem, DefaultPattern}, nil},
-		{"unowned", false, nil, EquipInput{"theme-nebula", DefaultEmblem, DefaultPattern}, ErrNotOwned},
-		{"revoked-admin-forged-entitlement", false, []string{"theme-xlavelia"}, EquipInput{"theme-xlavelia", DefaultEmblem, DefaultPattern}, ErrNotOwned},
-		{"live-admin", true, nil, EquipInput{"theme-xlavelia", "emblem-sigil", "pattern-monogram"}, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			writes := 0
-			tx := &scriptedTx{}
-			tx.row = func(q string, args ...any) pgx.Row {
-				if strings.Contains(q, "SELECT u.id,u.player_id,u.is_admin,") {
-					if !strings.Contains(q, "FOR NO KEY UPDATE") {
-						t.Fatal("admin role not locked")
-					}
-					return testRow{values: []any{1, "123456", tc.admin, false}}
-				}
-				if strings.Contains(q, "SELECT u.id,u.player_id,u.username,") {
-					return testRow{values: []any{1, "123456", "Player", "", nil, tc.in.ThemeID, tc.in.EmblemID, tc.in.PatternID, tc.admin, time.Unix(0, 0).UTC(), true, 0.0, nil, nil}}
-				}
-				return testRow{values: []any{0.0}}
-			}
-			tx.query = func(q string, args ...any) (pgx.Rows, error) {
-				if q != ownershipSQL {
-					t.Fatal(q)
-				}
-				data := [][]any{}
-				for _, id := range tc.owned {
-					data = append(data, []any{id})
-				}
-				return &testRows{data: data}, nil
-			}
-			tx.exec = func(q string, args ...any) (pgconn.CommandTag, error) {
-				writes++
-				if strings.Contains(q, "UPDATE user_profiles SET theme_id=") && !reflect.DeepEqual(args, []any{1, tc.in.ThemeID, tc.in.EmblemID, tc.in.PatternID}) {
-					t.Fatal("equipped values not parameterized")
-				}
-				return pgconn.NewCommandTag("UPDATE 1"), nil
-			}
-			store := &Store{db: scriptedDB{tx: tx}}
-			_, err := store.Equip(context.Background(), "123456", tc.in)
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatal(err)
-			}
-			if tc.wantErr != nil && (writes != 0 || tx.committed || !tx.rolled) {
-				t.Fatal("unowned equip was persisted")
-			}
-			if tc.wantErr == nil && (writes != 2 || !tx.committed) {
-				t.Fatal("valid equip was not committed")
-			}
-		})
 	}
 }

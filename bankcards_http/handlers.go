@@ -15,13 +15,15 @@ import (
 )
 
 type cardResponse struct {
-	ID                 int     `json:"id"`
-	Name               string  `json:"name"`
-	DesignID           int     `json:"designId"`
-	CardNumber         string  `json:"cardNumber"`
-	Balance            float64 `json:"balance"`
-	IsActiveForTrading bool    `json:"isActiveForTrading"`
-	OpenedAt           string  `json:"openedAt"`
+	ID                 int                                `json:"id"`
+	Name               string                             `json:"name"`
+	DesignID           int                                `json:"designId"`
+	DesignKey          string                             `json:"designKey,omitempty"`
+	Custom             *bankcards_sql.CardCustomDesign    `json:"custom,omitempty"`
+	CardNumber         string                             `json:"cardNumber"`
+	Balance            float64                            `json:"balance"`
+	IsActiveForTrading bool                               `json:"isActiveForTrading"`
+	OpenedAt           string                             `json:"openedAt"`
 }
 
 type listResponse struct {
@@ -31,8 +33,8 @@ type listResponse struct {
 
 func responseCard(c bankcards_sql.Card) cardResponse {
 	return cardResponse{
-		ID: c.ID, Name: c.Name, DesignID: c.DesignID, CardNumber: c.CardNumber,
-		Balance: c.Balance, IsActiveForTrading: c.IsActiveForTrading,
+		ID: c.ID, Name: c.Name, DesignID: c.DesignID, DesignKey: c.DesignKey, Custom: c.Custom,
+		CardNumber: c.CardNumber, Balance: c.Balance, IsActiveForTrading: c.IsActiveForTrading,
 		OpenedAt: c.OpenedAt.UTC().Format(time.RFC3339),
 	}
 }
@@ -44,7 +46,11 @@ func writeError(w http.ResponseWriter, status int, message string) {
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, dst interface{}) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	return decodeRequestLimit(w, r, dst, 4096)
+}
+
+func decodeRequestLimit(w http.ResponseWriter, r *http.Request, dst interface{}, limit int64) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return err
@@ -57,8 +63,12 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, dst interface{}) erro
 
 func writeCardError(w http.ResponseWriter, err error, fallback string) {
 	switch {
-	case errors.Is(err, bankcards_sql.ErrInvalidName), errors.Is(err, bankcards_sql.ErrInvalidDesign), errors.Is(err, bankcards_sql.ErrInvalidAmount):
+	case errors.Is(err, bankcards_sql.ErrInvalidName), errors.Is(err, bankcards_sql.ErrInvalidDesign),
+		errors.Is(err, bankcards_sql.ErrInvalidAmount), errors.Is(err, bankcards_sql.ErrCustomInvalid),
+		errors.Is(err, bankcards_sql.ErrVoucherInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, bankcards_sql.ErrDesignNotOwned):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, bankcards_sql.ErrCardNotFound):
@@ -101,8 +111,28 @@ func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type openRequest struct {
-	Name     string `json:"name"`
-	DesignID int    `json:"designId"`
+	Name      string                             `json:"name"`
+	DesignID  *int                               `json:"designId"`
+	DesignKey string                             `json:"designKey"`
+	Custom    *bankcards_sql.CardCustomDesign    `json:"custom"`
+	VoucherID int                                `json:"voucherId"`
+}
+
+// designRequest — смена оформления существующего счёта.
+type designRequest struct {
+	CardID    int                             `json:"cardId"`
+	DesignID  *int                            `json:"designId"`
+	DesignKey string                          `json:"designKey"`
+	Custom    *bankcards_sql.CardCustomDesign `json:"custom"`
+	VoucherID int                             `json:"voucherId"`
+}
+
+func designChoiceFromRequest(designID *int, designKey string, custom *bankcards_sql.CardCustomDesign) bankcards_sql.DesignChoice {
+	choice := bankcards_sql.DesignChoice{DesignKey: designKey, Custom: custom}
+	if designID != nil {
+		choice.DesignID = *designID
+	}
+	return choice
 }
 
 func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -117,13 +147,8 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req openRequest
-		if err := decodeRequest(w, r, &req); err != nil {
+		if err := decodeRequestLimit(w, r, &req, 512*1024); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		name, err := bankcards_sql.ValidateOpenCard(req.Name, req.DesignID)
-		if err != nil {
-			writeCardError(w, err, "invalid account")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
@@ -131,9 +156,76 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		card, err := bankcards_sql.OpenCard(r.Context(), pool, userID, name, req.DesignID)
+		choice := designChoiceFromRequest(req.DesignID, req.DesignKey, req.Custom)
+		card, err := bankcards_sql.OpenCardEx(r.Context(), pool, userID, req.Name, choice, req.VoucherID)
 		if err != nil {
 			writeCardError(w, err, "could not open card")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(responseCard(card))
+	}
+}
+
+type customChargeRequest struct {
+	VoucherID int `json:"voucherId"`
+}
+
+// CustomChargeHandler оплачивает кастомный дизайн кошелька: карточки у главного счёта нет.
+func CustomChargeHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		authUser, ok := auth_http.UserFromContext(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		var req customChargeRequest
+		if err := decodeRequest(w, r, &req); err != nil || req.VoucherID < 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		if err := bankcards_sql.ChargeCustomDesign(r.Context(), pool, userID, req.VoucherID); err != nil {
+			writeCardError(w, err, "could not charge custom design")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func DesignHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		authUser, ok := auth_http.UserFromContext(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		var req designRequest
+		if err := decodeRequestLimit(w, r, &req, 512*1024); err != nil || req.CardID <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		choice := designChoiceFromRequest(req.DesignID, req.DesignKey, req.Custom)
+		card, err := bankcards_sql.SetCardDesign(r.Context(), pool, userID, req.CardID, choice, req.VoucherID)
+		if err != nil {
+			writeCardError(w, err, "could not update card design")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

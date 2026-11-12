@@ -121,7 +121,7 @@ func TestUpdateKeepsExistingNames(t *testing.T) {
 					checks++
 					return testRow{values: []any{tc.taken}}
 				case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-					return testRow{values: []any{1, "123456", current, "New bio", nil, DefaultTheme, DefaultEmblem, DefaultPattern, false, time.Unix(0, 0).UTC(), false, nil, nil, nil}}
+					return testRow{values: []any{1, "123456", current, "New bio", nil, nil, false, time.Unix(0, 0).UTC(), false, nil, nil, nil}}
 				case strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 					return testRow{values: []any{100.0}}
 				default:
@@ -158,7 +158,7 @@ func TestUpdateKeepsExistingNames(t *testing.T) {
 }
 
 func TestGrantRejectsAdminWithoutSQL(t *testing.T) {
-	for _, id := range []string{"theme-xlavelia", "theme-wave", "emblem-sigil", "pattern-monogram"} {
+	for _, id := range []string{"card-xlavelia", "card-wave"} {
 		added, err := GrantCosmeticTx(context.Background(), nil, 1, id, "admin")
 		if added || !errors.Is(err, ErrForbidden) {
 			t.Fatalf("admin grant %s: %v %v", id, added, err)
@@ -167,7 +167,7 @@ func TestGrantRejectsAdminWithoutSQL(t *testing.T) {
 	for _, args := range []struct {
 		id, source string
 		user       int
-	}{{"unknown", "reward", 1}, {"theme-sage", "", 1}, {"theme-sage", "bad\nsource", 1}, {"theme-sage", "reward", 0}} {
+	}{{"unknown", "reward", 1}, {"card-sage", "", 1}, {"card-sage", "bad\nsource", 1}, {"card-sage", "reward", 0}} {
 		added, err := GrantCosmeticTx(context.Background(), nil, args.user, args.id, args.source)
 		if added || !errors.Is(err, ErrInvalid) {
 			t.Fatalf("invalid grant allowed: %+v", args)
@@ -197,12 +197,12 @@ func TestGrantConflictAndAccountBan(t *testing.T) {
 				if q != grantCosmeticSQL || !strings.Contains(q, "ON CONFLICT (user_id, cosmetic_id) DO NOTHING") {
 					t.Fatal(q)
 				}
-				if !reflect.DeepEqual(args, []any{1, "theme-sage", "battlepass:free:5"}) {
+				if !reflect.DeepEqual(args, []any{1, "card-sage", "battlepass:free:5"}) {
 					t.Fatal(args)
 				}
 				return pgconn.NewCommandTag(fmt.Sprintf("INSERT 0 %d", tc.affected)), nil
 			}}
-			added, err := GrantCosmeticTx(context.Background(), tx, 1, "theme-sage", "battlepass:free:5")
+			added, err := GrantCosmeticTx(context.Background(), tx, 1, "card-sage", "battlepass:free:5")
 			if added != tc.want || !errors.Is(err, tc.wantErr) {
 				t.Fatalf("%v %v", added, err)
 			}
@@ -234,7 +234,7 @@ func purchaseScript(t *testing.T, balance float64, owned, conflict bool, debitEr
 		case strings.HasPrefix(q, "SELECT "+bannedSQL):
 			return testRow{values: []any{false}}
 		case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-			return testRow{values: []any{1, "123456", "Player", "", nil, DefaultTheme, DefaultEmblem, DefaultPattern, false, time.Unix(0, 0).UTC(), true, 42.0, nil, nil}}
+			return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 42.0, nil, nil}}
 		case strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 			return testRow{values: []any{balance}}
 		default:
@@ -249,7 +249,7 @@ func purchaseScript(t *testing.T, balance float64, owned, conflict bool, debitEr
 		}
 		data := [][]any{}
 		if entitlement {
-			data = append(data, []any{"theme-silk"})
+			data = append(data, []any{"card-silk"})
 		}
 		return &testRows{data: data}, nil
 	}
@@ -257,7 +257,7 @@ func purchaseScript(t *testing.T, balance float64, owned, conflict bool, debitEr
 		calls = append(calls, q)
 		switch q {
 		case grantCosmeticSQL:
-			if !reflect.DeepEqual(args, []any{1, "theme-silk", "shop"}) {
+			if !reflect.DeepEqual(args, []any{1, "card-silk", "shop"}) {
 				t.Fatal(args)
 			}
 			entitlement = true
@@ -301,7 +301,7 @@ func TestPurchaseAtomicity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, tx, calls := purchaseScript(t, tc.balance, tc.owned, tc.conflict, tc.debitErr)
-			state, err := store.Purchase(context.Background(), "123456", "theme-silk")
+			state, err := store.Purchase(context.Background(), "123456", "card-silk")
 			if tc.wantErr != nil {
 				if err == nil || err.Error() != tc.wantErr.Error() || !tx.rolled || tx.committed {
 					t.Fatalf("must rollback: err=%v rolled=%v committed=%v", err, tx.rolled, tx.committed)
@@ -338,7 +338,7 @@ func TestPurchaseAtomicity(t *testing.T) {
 				}
 				silkOwned := false
 				for _, c := range state.Catalog {
-					if c.ID == "theme-silk" {
+					if c.ID == "card-silk" {
 						silkOwned = c.Owned
 					}
 				}
@@ -349,7 +349,7 @@ func TestPurchaseAtomicity(t *testing.T) {
 		})
 	}
 	store := &Store{}
-	for _, id := range []string{"theme-xlavelia", "theme-wave", "theme-sage", DefaultTheme, "emblem-dragon"} {
+	for _, id := range []string{"card-xlavelia", "card-wave", "card-sage", "card-silver"} {
 		if _, err := store.Purchase(context.Background(), "123456", id); !errors.Is(err, ErrNotPurchasable) {
 			t.Fatal(id, err)
 		}
@@ -379,7 +379,7 @@ func TestPrivateAccountValidity(t *testing.T) {
 }
 
 func TestPublicScannerRedactsAndUsesInlineJPEG(t *testing.T) {
-	row := testRow{values: []any{2, "654321", "Player", "", []byte{0xff, 0xd8, 0xff}, DefaultTheme, DefaultEmblem, DefaultPattern, false, time.Unix(0, 0).UTC(), false, 123.0, 2, "pending"}}
+	row := testRow{values: []any{2, "654321", "Player", "", []byte{0xff, 0xd8, 0xff}, nil, false, time.Unix(0, 0).UTC(), false, 123.0, 2, "pending"}}
 	p, err := scanPublic(row, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -433,7 +433,7 @@ func (tx *memoryPurchaseTx) QueryRow(_ context.Context, q string, args ...any) p
 	case q == lockWalletSQL || strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 		return testRow{values: []any{tx.balance}}
 	case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-		return testRow{values: []any{1, "123456", "Player", "", nil, DefaultTheme, DefaultEmblem, DefaultPattern, false, time.Unix(0, 0).UTC(), true, 0.0, nil, nil}}
+		return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 0.0, nil, nil}}
 	}
 	return testRow{err: fmt.Errorf("unexpected query %s", q)}
 }
@@ -443,7 +443,7 @@ func (tx *memoryPurchaseTx) Query(_ context.Context, q string, args ...any) (pgx
 	}
 	data := [][]any{}
 	if tx.owned {
-		data = append(data, []any{"theme-silk"})
+		data = append(data, []any{"card-silk"})
 	}
 	return &testRows{data: data}, nil
 }
@@ -476,7 +476,7 @@ func TestConcurrentPurchaseRetriesAndRollback(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, err := store.Purchase(context.Background(), "123456", "theme-silk")
+				_, err := store.Purchase(context.Background(), "123456", "card-silk")
 				errs <- err
 			}()
 		}

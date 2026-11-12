@@ -25,22 +25,24 @@ func MigrateBankCardsSchema(ctx context.Context, pool *pgxpool.Pool) error {
 
 	ALTER TABLE bank_cards ADD COLUMN IF NOT EXISTS name VARCHAR(32);
 	ALTER TABLE bank_cards ADD COLUMN IF NOT EXISTS design_id INT;
+	ALTER TABLE bank_cards ADD COLUMN IF NOT EXISTS design_key VARCHAR(32);
+	ALTER TABLE bank_cards ADD COLUMN IF NOT EXISTS custom JSONB;
 	WITH ordered AS (
 		SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY opened_at ASC, id ASC) AS n
 		FROM bank_cards
 	)
 	UPDATE bank_cards bc
 	SET name = COALESCE(bc.name, 'Account ' || ordered.n::text),
-		design_id = COALESCE(bc.design_id, ((ordered.n - 1) % 5)::int)
+		design_id = COALESCE(bc.design_id, ((ordered.n - 1) % 4)::int)
 	FROM ordered WHERE bc.id = ordered.id AND (bc.name IS NULL OR bc.design_id IS NULL);
-	UPDATE bank_cards SET design_id = design_id % 5 WHERE design_id IS NOT NULL AND design_id > 4;
+	-- Осталось четыре базовых дизайна (0–3): кошелёк и три основных счёта.
+	UPDATE bank_cards SET design_id = design_id % 4 WHERE design_id IS NOT NULL AND design_id > 3;
 	UPDATE bank_cards SET tier = 'standard' WHERE tier <> 'standard';
 	ALTER TABLE bank_cards ALTER COLUMN tier SET DEFAULT 'standard';
 	ALTER TABLE bank_cards ALTER COLUMN name SET NOT NULL;
 	ALTER TABLE bank_cards ALTER COLUMN design_id SET NOT NULL;
-	-- Единый набор из пяти дизайнов (0–4) для всех счетов.
 	ALTER TABLE bank_cards DROP CONSTRAINT IF EXISTS bank_cards_design_check;
-	ALTER TABLE bank_cards ADD CONSTRAINT bank_cards_design_check CHECK (design_id BETWEEN 0 AND 4);
+	ALTER TABLE bank_cards ADD CONSTRAINT bank_cards_design_check CHECK (design_id BETWEEN 0 AND 3);
 	DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bank_cards_name_check' AND conrelid = 'bank_cards'::regclass) THEN
 			ALTER TABLE bank_cards ADD CONSTRAINT bank_cards_name_check CHECK (char_length(name) BETWEEN 1 AND 32);

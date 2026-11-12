@@ -27,9 +27,7 @@ type PublicProfile struct {
 	Username    string    `json:"username"`
 	Bio         string    `json:"bio"`
 	AvatarURL   string    `json:"avatarUrl"`
-	ThemeID     string    `json:"themeId"`
-	EmblemID    string    `json:"emblemId"`
-	PatternID   string    `json:"patternId"`
+	BannerURL   string    `json:"bannerUrl"`
 	IsAdmin     bool      `json:"isAdmin"`
 	CreatedAt   time.Time `json:"createdAt"`
 	ShowBalance bool      `json:"showBalance"`
@@ -47,12 +45,6 @@ type UpdateInput struct {
 	Username    string `json:"username"`
 	Bio         string `json:"bio"`
 	ShowBalance bool   `json:"showBalance"`
-}
-
-type EquipInput struct {
-	ThemeID   string `json:"themeId"`
-	EmblemID  string `json:"emblemId"`
-	PatternID string `json:"patternId"`
 }
 
 type News struct {
@@ -126,17 +118,7 @@ func ValidateSearch(q string) error {
 	return nil
 }
 
-func ValidateEquip(in EquipInput) error {
-	for _, item := range []struct{ id, kind string }{{in.ThemeID, "theme"}, {in.EmblemID, "emblem"}, {in.PatternID, "pattern"}} {
-		c, ok := GetCosmetic(item.id)
-		if !ok || c.Kind != item.kind {
-			return ErrInvalid
-		}
-	}
-	return nil
-}
-
-// Повторная проверка защищает от опасного текста в новостях, правленных через SQL.
+// Повторная проверка защищает от опасного текста в новостях, правленых через SQL.
 var newsLinks = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://|(https?|ftp|mailto|tel|javascript|data):|www\.|//|\[[^\]]*\]\(|([a-z0-9][a-z0-9-]*\.)+[a-z]{2,63}\b)`)
 
 func ValidNews(n News) bool {
@@ -158,12 +140,4 @@ func ValidNews(n News) bool {
 		return true
 	}
 	return false
-}
-
-func displayCosmetic(id, kind, fallback string, owned map[string]bool, admin bool) string {
-	c, ok := GetCosmetic(id)
-	if !ok || c.Kind != kind || !HasCosmetic(id, owned, admin) {
-		return fallback
-	}
-	return id
 }
