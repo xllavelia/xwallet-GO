@@ -29,6 +29,8 @@ import (
 	"xwallet-server/home_http"
 	"xwallet-server/mining_http"
 	"xwallet-server/mining_sql"
+	"xwallet-server/nft_http"
+	"xwallet-server/nft_sql"
 	"xwallet-server/p2p_http"
 	"xwallet-server/p2p_sql"
 	"xwallet-server/pixel_engine"
@@ -230,6 +232,9 @@ func main() {
 	if err := rewards_sql.MigrateRewardsSchema(ctx, pool); err != nil {
 		log.Fatal("rewards schema migration: ", err)
 	}
+	if err := nft_sql.MigrateSchema(ctx, pool); err != nil {
+		log.Fatal("nft schema migration: ", err)
+	}
 	if err := empire_sql.CreateEmpireTables(ctx, pool); err != nil {
 		log.Fatal("empire tables: ", err)
 	}
@@ -355,6 +360,15 @@ func main() {
 	http.HandleFunc("/pixel/cashout", auth_http.WithCORS(auth_http.RequireAuth(pixel_http.CashoutHandler(pool))))
 	http.HandleFunc("/rewards/state", auth_http.WithCORS(auth_http.RequireAuth(rewards_http.StateHandler(pool))))
 	http.HandleFunc("/rewards/claim", auth_http.WithCORS(auth_http.RequireAuth(rewards_http.ClaimHandler(pool))))
+	http.HandleFunc("/nft/state", auth_http.WithCORS(auth_http.RequireAuth(nft_http.StateHandler(pool))))
+	http.HandleFunc("/nft/market", auth_http.WithCORS(auth_http.RequireAuth(nft_http.MarketHandler(pool))))
+	http.HandleFunc("/nft/collect", auth_http.WithCORS(auth_http.RequireAuth(nft_http.CollectHandler(pool))))
+	http.HandleFunc("/nft/sell", auth_http.WithCORS(auth_http.RequireAuth(nft_http.SellHandler(pool))))
+	http.HandleFunc("/nft/list", auth_http.WithCORS(auth_http.RequireAuth(nft_http.ListHandler(pool))))
+	http.HandleFunc("/nft/unlist", auth_http.WithCORS(auth_http.RequireAuth(nft_http.UnlistHandler(pool))))
+	http.HandleFunc("/nft/buy", auth_http.WithCORS(auth_http.RequireAuth(nft_http.BuyHandler(pool))))
+	http.HandleFunc("/nft/game/buy", auth_http.WithCORS(auth_http.RequireAuth(nft_http.GameBuyHandler(pool))))
+	http.HandleFunc("/nft/packs/buy", auth_http.WithCORS(auth_http.RequireAuth(nft_http.PackBuyHandler(pool))))
 	http.HandleFunc("/flip/state", auth_http.WithCORS(auth_http.RequireAuth(flip_http.StateHandler(pool))))
 	http.HandleFunc("/flip/bet", auth_http.WithCORS(auth_http.RequireAuth(flip_http.BetHandler(pool))))
 	http.HandleFunc("/ticket/state", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.StateHandler(pool))))

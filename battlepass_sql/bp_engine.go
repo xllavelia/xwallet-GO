@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"xwallet-server/nft_sql"
 	"xwallet-server/profile_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
@@ -90,16 +91,17 @@ type BPPurchaseResult struct {
 }
 
 type BPClaimResult struct {
-	Level       int        `json:"level"`
-	Track       string     `json:"track"`
-	Rewards     []BPReward `json:"rewards"`
-	Notes       []string   `json:"notes,omitempty"`
-	CaseTokenID int64      `json:"caseTokenId,omitempty"`
-	CaseRarity  string     `json:"caseRarity,omitempty"`
-	XP          int64      `json:"xp"`
-	LevelAfter  int        `json:"levelAfter"`
-	LevelXP     int64      `json:"levelXp"`
-	LeveledUp   bool       `json:"leveledUp"`
+	Level       int                `json:"level"`
+	Track       string             `json:"track"`
+	Rewards     []BPReward         `json:"rewards"`
+	Notes       []string           `json:"notes,omitempty"`
+	CaseTokenID int64              `json:"caseTokenId,omitempty"`
+	CaseRarity  string             `json:"caseRarity,omitempty"`
+	Nfts        []nft_sql.ItemView `json:"nfts,omitempty"`
+	XP          int64              `json:"xp"`
+	LevelAfter  int                `json:"levelAfter"`
+	LevelXP     int64              `json:"levelXp"`
+	LeveledUp   bool               `json:"leveledUp"`
 }
 
 type BPQuest struct {
@@ -795,6 +797,9 @@ func BPClaimReward(ctx context.Context, pool *pgxpool.Pool, userID int, level in
 	if _, err := referral_sql.GetOrCreateByUserID(ctx, pool, userID); err != nil {
 		return nil, err
 	}
+	if err := nft_sql.Ensure(ctx, pool); err != nil {
+		return nil, err
+	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -843,7 +848,19 @@ ON CONFLICT (user_id, season_id, level, track) DO NOTHING;
 	notes := []string{}
 	var caseTokenID int64
 	var caseRarity string
+	nfts := []nft_sql.ItemView{}
 	for _, r := range rewards {
+		if r.Kind == "nft" {
+			items, note, err := nft_sql.GrantTx(ctx, tx, userID, nft_sql.GrantSpec{Rarity: r.Rarity, Count: r.Count, Pack: r.Pack}, "Battle Pass")
+			if err != nil {
+				return nil, err
+			}
+			nfts = append(nfts, items...)
+			if note != "" {
+				notes = append(notes, note)
+			}
+			continue
+		}
 		tokenID, note, err := bpGrantRewardTx(ctx, tx, userID, season.ID, r, level, track, false)
 		if err != nil {
 			return nil, err
@@ -870,6 +887,7 @@ ON CONFLICT (user_id, season_id, level, track) DO NOTHING;
 		Notes:       notes,
 		CaseTokenID: caseTokenID,
 		CaseRarity:  caseRarity,
+		Nfts:        nfts,
 		XP:          xp,
 		LevelAfter:  currentLevel,
 		LevelXP:     func() int64 { _, lx := BPLevelForXP(xp); return lx }(),

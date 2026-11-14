@@ -130,7 +130,7 @@ func TestBattlepassHistoryDoesNotInventCosmetics(t *testing.T) {
 		}
 		var original []battlepass_sql.BPReward
 		for _, reward := range rewards {
-			if reward.Kind != "cosmetic" {
+			if reward.Kind != "cosmetic" && reward.Kind != "nft" {
 				original = append(original, reward)
 			}
 		}

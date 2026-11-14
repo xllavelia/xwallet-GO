@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"xwallet-server/nft_sql"
 	"xwallet-server/prime_sql"
 	"xwallet-server/user_vouchers_sql"
 )
@@ -19,16 +20,20 @@ var (
 )
 
 type ClaimResult struct {
-	Day              int               `json:"day"`
-	Track            string            `json:"track"`
-	Granted          []RewardComponent `json:"granted"`
-	FinishedTrack    bool              `json:"finishedTrack"`
-	SecondsRemaining int               `json:"secondsRemaining"`
+	Day              int                `json:"day"`
+	Track            string             `json:"track"`
+	Granted          []RewardComponent  `json:"granted"`
+	FinishedTrack    bool               `json:"finishedTrack"`
+	SecondsRemaining int                `json:"secondsRemaining"`
+	Nfts             []nft_sql.ItemView `json:"nfts,omitempty"`
 }
 
 func ClaimDailyReward(ctx context.Context, pool *pgxpool.Pool, userID int) (*ClaimResult, error) {
 	maxSlots, err := prime_sql.GetMaxVoucherSlots(ctx, pool, userID)
 	if err != nil {
+		return nil, err
+	}
+	if err = nft_sql.Ensure(ctx, pool); err != nil {
 		return nil, err
 	}
 
@@ -97,8 +102,13 @@ ON CONFLICT (user_id, track, day) DO NOTHING;
 
 	reward := catalog[day-1]
 	granted := make([]RewardComponent, 0, len(reward.Components))
+	var nfts []nft_sql.ItemView
 	for _, comp := range reward.Components {
 		switch comp.Kind {
+		case "nft":
+			var items []nft_sql.ItemView
+			items, _, err = nft_sql.GrantTx(ctx, tx, userID, nft_sql.GrantSpec{Rarity: comp.Rarity, Count: 1}, "Daily Rewards")
+			nfts = append(nfts, items...)
 		case "usdt":
 			_, err = tx.Exec(ctx, `
 UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2;
@@ -151,5 +161,6 @@ UPDATE daily_rewards_progress SET track = $2, last_claimed_at = now() WHERE user
 		Granted:          granted,
 		FinishedTrack:    finished,
 		SecondsRemaining: int(Cooldown.Seconds()),
+		Nfts:             nfts,
 	}, nil
 }

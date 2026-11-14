@@ -29,6 +29,9 @@ type BPReward struct {
 	CosmeticKind string  `json:"cosmeticKind,omitempty"`
 	Label        string  `json:"label,omitempty"`
 	Display      string  `json:"display,omitempty"`
+	Rarity       string  `json:"rarity,omitempty"`
+	Count        int     `json:"count,omitempty"`
+	Pack         string  `json:"pack,omitempty"`
 }
 
 type BPLevelRewards struct {

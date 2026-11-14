@@ -189,6 +189,9 @@ func dailyActivityEvents(id int64, track string, day int, at time.Time) ([]activ
 			asset = "XP"
 		case "voucher":
 			asset, kind = "voucher", "voucher_issued"
+		case "nft":
+			// NFT добавлены позже — старые клеймы их не получали, видны в инвентаре NFT
+			continue
 		default:
 			return nil, fmt.Errorf("unknown daily component %q", comp.Kind)
 		}
@@ -260,7 +263,7 @@ func battlepassActivityEvents(userID int, seasonID int64, season string, level i
 	events := []activityEvent{}
 	for i, reward := range rewards {
 		// Старые клеймы не содержат снимок наград и не доказывают новое открытие.
-		if reward.Kind == "cosmetic" {
+		if reward.Kind == "cosmetic" || reward.Kind == "nft" {
 			continue
 		}
 		asset, kind, amount, err := battlepassRewardAmount(reward)
