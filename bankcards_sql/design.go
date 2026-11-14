@@ -40,10 +40,11 @@ type CardSide struct {
 // CardCustomDesign — пользовательская карточка: левая 2/3 и правая 1/3.
 // Link объединяет части: левая заливка и цвет текста действуют на всю карту.
 type CardCustomDesign struct {
-	Left  CardSide `json:"left"`
-	Right CardSide `json:"right"`
-	Ink   string   `json:"ink,omitempty"`
-	Link  bool     `json:"link"`
+	Left       CardSide `json:"left"`
+	Right      CardSide `json:"right"`
+	Ink        string   `json:"ink,omitempty"`
+	InkOpacity *float64 `json:"inkOpacity,omitempty"`
+	Link       bool     `json:"link"`
 }
 
 // DesignChoice — выбор оформления: базовый дизайн, разблокированный или кастомный.
@@ -95,7 +96,10 @@ func ValidateCustomDesign(custom *CardCustomDesign) (*CardCustomDesign, error) {
 	if custom == nil {
 		return nil, nil
 	}
-	out := &CardCustomDesign{Link: custom.Link, Ink: custom.Ink}
+	if custom.InkOpacity != nil && (*custom.InkOpacity < 0 || *custom.InkOpacity > 1) {
+		return nil, ErrCustomInvalid
+	}
+	out := &CardCustomDesign{Link: custom.Link, Ink: custom.Ink, InkOpacity: custom.InkOpacity}
 	var err error
 	if out.Left.Color, err = NormalizeHexColor(custom.Left.Color); err != nil {
 		return nil, err

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"xwallet-server/nft_sql"
 	"xwallet-server/profile_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
@@ -90,16 +91,17 @@ type BPPurchaseResult struct {
 }
 
 type BPClaimResult struct {
-	Level       int        `json:"level"`
-	Track       string     `json:"track"`
-	Rewards     []BPReward `json:"rewards"`
-	Notes       []string   `json:"notes,omitempty"`
-	CaseTokenID int64      `json:"caseTokenId,omitempty"`
-	CaseRarity  string     `json:"caseRarity,omitempty"`
-	XP          int64      `json:"xp"`
-	LevelAfter  int        `json:"levelAfter"`
-	LevelXP     int64      `json:"levelXp"`
-	LeveledUp   bool       `json:"leveledUp"`
+	Level       int                `json:"level"`
+	Track       string             `json:"track"`
+	Rewards     []BPReward         `json:"rewards"`
+	Notes       []string           `json:"notes,omitempty"`
+	CaseTokenID int64              `json:"caseTokenId,omitempty"`
+	CaseRarity  string             `json:"caseRarity,omitempty"`
+	Nfts        []nft_sql.ItemView `json:"nfts,omitempty"`
+	XP          int64              `json:"xp"`
+	LevelAfter  int                `json:"levelAfter"`
+	LevelXP     int64              `json:"levelXp"`
+	LeveledUp   bool               `json:"leveledUp"`
 }
 
 type BPQuest struct {
@@ -240,6 +242,36 @@ UPDATE bp_profiles SET xp = xp + $1, updated_at = now()
 WHERE user_id = $2 RETURNING xp;
 `, amount, userID).Scan(&xp)
 	return xp, err
+}
+
+// BPAwardXPTx начисляет XP в текущий сезон Battle Pass V2 внутри чужой транзакции.
+func BPAwardXPTx(ctx context.Context, tx pgx.Tx, userID int, amount int) (int64, error) {
+	if amount <= 0 {
+		return 0, nil
+	}
+	var seasonID int64
+	err := tx.QueryRow(ctx, `
+SELECT id FROM bp_seasons WHERE is_active ORDER BY id DESC LIMIT 1;
+`).Scan(&seasonID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Тот же advisory-ключ, что и в BPEnsureSeason, чтобы не создать два активных сезона.
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(918273645);`); err != nil {
+			return 0, err
+		}
+		now := time.Now().UTC()
+		err = tx.QueryRow(ctx, `
+INSERT INTO bp_seasons(label, starts_at, ends_at, is_active)
+VALUES ($1, $2, $3, true)
+RETURNING id;
+`, BPSeasonLabel, now, now.Add(BPSeasonDuration)).Scan(&seasonID)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if _, err = bpEnsureProfileTx(ctx, tx, userID, seasonID); err != nil {
+		return 0, err
+	}
+	return bpAddXPTx(ctx, tx, userID, amount)
 }
 
 func BPLoadState(ctx context.Context, pool *pgxpool.Pool, userID int) (*BPState, error) {
@@ -795,6 +827,9 @@ func BPClaimReward(ctx context.Context, pool *pgxpool.Pool, userID int, level in
 	if _, err := referral_sql.GetOrCreateByUserID(ctx, pool, userID); err != nil {
 		return nil, err
 	}
+	if err := nft_sql.Ensure(ctx, pool); err != nil {
+		return nil, err
+	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -843,7 +878,19 @@ ON CONFLICT (user_id, season_id, level, track) DO NOTHING;
 	notes := []string{}
 	var caseTokenID int64
 	var caseRarity string
+	nfts := []nft_sql.ItemView{}
 	for _, r := range rewards {
+		if r.Kind == "nft" {
+			items, note, err := nft_sql.GrantTx(ctx, tx, userID, nft_sql.GrantSpec{Rarity: r.Rarity, Count: r.Count, Pack: r.Pack}, "Battle Pass")
+			if err != nil {
+				return nil, err
+			}
+			nfts = append(nfts, items...)
+			if note != "" {
+				notes = append(notes, note)
+			}
+			continue
+		}
 		tokenID, note, err := bpGrantRewardTx(ctx, tx, userID, season.ID, r, level, track, false)
 		if err != nil {
 			return nil, err
@@ -870,6 +917,7 @@ ON CONFLICT (user_id, season_id, level, track) DO NOTHING;
 		Notes:       notes,
 		CaseTokenID: caseTokenID,
 		CaseRarity:  caseRarity,
+		Nfts:        nfts,
 		XP:          xp,
 		LevelAfter:  currentLevel,
 		LevelXP:     func() int64 { _, lx := BPLevelForXP(xp); return lx }(),

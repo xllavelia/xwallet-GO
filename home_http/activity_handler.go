@@ -14,6 +14,7 @@ import (
 
 	"xwallet-server/auth_http"
 	"xwallet-server/battlepass_sql"
+	"xwallet-server/nft_sql"
 	"xwallet-server/rewards_sql"
 
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,7 @@ func newActivityResponse() activityResponse {
 			"Daily and battle pass level rewards and pass prices use current catalogs; historical catalog versions are not recorded.",
 			"Daily voucher issuance can be skipped when slots are full; claims do not record that outcome. Battle pass level status grants or duplicate cash conversions are not recorded; status values are not counted as cash. New cosmetic rewards are not inferred from historical level claims.",
 			"Legacy TIMESTAMP fields have no stored timezone and are exposed as UTC. Rocket and Flip payouts use round ended_at; individual payout timestamps are not recorded.",
+			"NFT history follows mint and sale records. Hourly NFT income is not listed as separate events, and NFTs you no longer own appear only as sales.",
 		},
 	}
 }
@@ -119,6 +121,7 @@ func loadActivity(ctx context.Context, tx pgx.Tx, userID int) (activityResponse,
 	for _, load := range []func(context.Context, pgx.Tx, int, *activityResponse) error{
 		loadDailyActivity, loadBattlepassActivity, loadCaseActivity, loadQuestActivity,
 		loadTicketActivity, loadBetActivity, loadSlotsActivity, loadMarketActivity, loadVoucherActivity,
+		loadNftActivity,
 	} {
 		if err := load(ctx, tx, userID, &response); err != nil {
 			return activityResponse{}, err
@@ -189,6 +192,9 @@ func dailyActivityEvents(id int64, track string, day int, at time.Time) ([]activ
 			asset = "XP"
 		case "voucher":
 			asset, kind = "voucher", "voucher_issued"
+		case "nft":
+			// NFT добавлены позже — старые клеймы их не получали, видны в инвентаре NFT
+			continue
 		default:
 			return nil, fmt.Errorf("unknown daily component %q", comp.Kind)
 		}
@@ -260,7 +266,7 @@ func battlepassActivityEvents(userID int, seasonID int64, season string, level i
 	events := []activityEvent{}
 	for i, reward := range rewards {
 		// Старые клеймы не содержат снимок наград и не доказывают новое открытие.
-		if reward.Kind == "cosmetic" {
+		if reward.Kind == "cosmetic" || reward.Kind == "nft" {
 			continue
 		}
 		asset, kind, amount, err := battlepassRewardAmount(reward)
@@ -608,6 +614,89 @@ func loadVoucherActivity(ctx context.Context, tx pgx.Tx, userID int, response *a
 		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("voucher:claim:%d", id), voucherActivitySource(source),
 			"voucher_claim", "Voucher claimed · "+asset, asset, math.Abs(amount), at,
 			activityFactFor("Origin", source), activityFactFor("Voucher", voucherType)))
+		return nil
+	})
+}
+
+// NFT из наград BP и ежедневок остаются в своих разделах, остальное — в разделе NFT.
+func nftActivitySource(source string) string {
+	switch source {
+	case "Battle Pass":
+		return "battlepass"
+	case "Daily Rewards":
+		return "daily"
+	default:
+		return "nft"
+	}
+}
+
+func nftSaleMarket(kind string) string {
+	switch kind {
+	case "market":
+		return "Player market"
+	case "game":
+		return "xwallet Market"
+	default:
+		return "Instant sale"
+	}
+}
+
+func loadNftActivity(ctx context.Context, tx pgx.Tx, userID int, response *activityResponse) error {
+	// Только реальные минты: покупки с маркета приходят из nft_sales и не дублируются.
+	if err := activityRows(ctx, tx, userID, `
+		SELECT i.id, COALESCE(t.name, i.template_id), COALESCE(t.rarity, ''), i.serial, i.source,
+		       i.minted_at, COALESCE(t.base_price, 0)::float8
+		FROM nft_items i LEFT JOIN nft_templates t ON t.id = i.template_id
+		WHERE i.owner_id = $1 AND i.source NOT IN ('Market', 'xwallet Market');
+	`, func(rows pgx.Rows) error {
+		var id int64
+		var name, rarity, source string
+		var serial int
+		var at time.Time
+		var value float64
+		if err := rows.Scan(&id, &name, &rarity, &source, &serial, &at, &value); err != nil {
+			return err
+		}
+		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:item:%d", id), nftActivitySource(source), "nft",
+			fmt.Sprintf("%s #%d", name, serial), "NFT", 1, at,
+			activityFactFor("Source", source), activityFactFor("Rarity", rarity), activityFactFor("Value", fmt.Sprintf("$%.2f", value))))
+		return nil
+	}); err != nil {
+		return err
+	}
+	return activityRows(ctx, tx, userID, `
+		SELECT s.id, COALESCE(t.name, s.template_id), COALESCE(t.rarity, ''), s.serial, s.kind,
+		       s.price::float8, s.created_at,
+		       CASE WHEN s.buyer_id = $1 THEN 'buy' ELSE 'sell' END
+		FROM nft_sales s LEFT JOIN nft_templates t ON t.id = s.template_id
+		WHERE s.buyer_id = $1 OR s.seller_id = $1;
+	`, func(rows pgx.Rows) error {
+		var id int64
+		var name, rarity, kind, side string
+		var serial int
+		var price float64
+		var at time.Time
+		if err := rows.Scan(&id, &name, &rarity, &serial, &kind, &price, &at, &side); err != nil {
+			return err
+		}
+		title := fmt.Sprintf("%s #%d", name, serial)
+		market := nftSaleMarket(kind)
+		if side == "buy" {
+			response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:sale:%d:buy", id), "nft", "buy",
+				"Bought "+title, "USD", -math.Abs(price), at,
+				activityFactFor("Market", market), activityFactFor("Price", fmt.Sprintf("$%.2f", price)),
+				activityFactFor("Rarity", rarity), activityFactFor("Sale ID", strconv.FormatInt(id, 10))))
+			return nil
+		}
+		net := price
+		facts := []activityFact{activityFactFor("Market", market), activityFactFor("Gross price", fmt.Sprintf("$%.2f", price))}
+		if kind == "market" {
+			net = math.Floor(price*(1-nft_sql.MarketFee)*100) / 100
+			facts = append(facts, activityFactFor("Fee", fmt.Sprintf("$%.2f", price-net)))
+		}
+		facts = append(facts, activityFactFor("Rarity", rarity), activityFactFor("Sale ID", strconv.FormatInt(id, 10)))
+		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:sale:%d:sell", id), "nft", "sell",
+			"Sold "+title, "USD", math.Abs(net), at, facts...))
 		return nil
 	})
 }

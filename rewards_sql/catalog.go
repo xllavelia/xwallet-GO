@@ -8,8 +8,9 @@ const (
 )
 
 type RewardComponent struct {
-	Kind  string  `json:"kind"`
-	Value float64 `json:"value"`
+	Kind   string  `json:"kind"`
+	Value  float64 `json:"value"`
+	Rarity string  `json:"rarity,omitempty"`
 }
 
 type DayReward struct {
@@ -32,6 +33,7 @@ func lavx(v float64) RewardComponent    { return RewardComponent{Kind: "lavx", V
 func voucher(v float64) RewardComponent { return RewardComponent{Kind: "voucher", Value: v} }
 func refXp(v float64) RewardComponent   { return RewardComponent{Kind: "ref_xp", Value: v} }
 func passXp(v float64) RewardComponent  { return RewardComponent{Kind: "pass_xp", Value: v} }
+func nft(r string) RewardComponent      { return RewardComponent{Kind: "nft", Value: 1, Rarity: r} }
 
 func day(n int, comps ...RewardComponent) DayReward {
 	return DayReward{Day: n, Components: comps}
@@ -39,66 +41,66 @@ func day(n int, comps ...RewardComponent) DayReward {
 
 var startCatalog = []DayReward{
 	day(1, usdt(10)),
-	day(2, passXp(10)),
+	day(2, passXp(200)),
 	day(3, usdt(3)),
 	day(4, refXp(5)),
 	day(5, voucher(1)),
 	day(6, lavx(2)),
-	day(7, usdt(3)),
-	day(8, passXp(15)),
+	day(7, usdt(3), nft("common")),
+	day(8, passXp(300)),
 	day(9, usdt(3)),
 	day(10, lavx(2)),
 	day(11, refXp(10)),
 	day(12, usdt(3)),
-	day(13, passXp(15)),
-	day(14, voucher(2)),
+	day(13, passXp(300)),
+	day(14, voucher(2), nft("uncommon")),
 	day(15, usdt(10)),
 	day(16, lavx(2)),
 	day(17, refXp(10)),
 	day(18, usdt(3)),
-	day(19, passXp(20)),
+	day(19, passXp(400)),
 	day(20, voucher(2)),
-	day(21, usdt(3)),
+	day(21, usdt(3), nft("uncommon")),
 	day(22, lavx(2)),
 	day(23, refXp(15)),
 	day(24, usdt(3)),
-	day(25, passXp(25)),
+	day(25, passXp(500)),
 	day(26, voucher(3)),
 	day(27, usdt(3)),
 	day(28, lavx(2)),
 	day(29, refXp(20)),
-	day(30, usdt(25), lavx(5)),
+	day(30, usdt(25), lavx(5), nft("rare")),
 }
 
 var proCatalog = []DayReward{
 	day(1, usdt(20)),
-	day(2, passXp(250)),
+	day(2, passXp(500)),
 	day(3, usdt(5)),
 	day(4, refXp(15)),
 	day(5, voucher(3)),
 	day(6, lavx(3)),
-	day(7, usdt(5)),
-	day(8, passXp(300)),
+	day(7, usdt(5), nft("uncommon")),
+	day(8, passXp(600)),
 	day(9, usdt(1.50)),
 	day(10, lavx(3)),
 	day(11, refXp(20)),
 	day(12, usdt(5)),
-	day(13, passXp(300)),
-	day(14, voucher(3)),
+	day(13, passXp(600)),
+	day(14, voucher(3), nft("rare")),
 	day(15, usdt(5)),
 	day(16, lavx(3)),
 	day(17, refXp(25)),
 	day(18, usdt(5)),
-	day(19, passXp(400)),
+	day(19, passXp(800)),
 	day(20, voucher(2)),
-	day(21, usdt(5)),
+	day(21, usdt(5), nft("rare")),
 	day(22, lavx(3)),
 	day(23, refXp(25)),
 	day(24, usdt(5)),
-	day(25, passXp(500)),
+	day(25, passXp(1000)),
 	day(26, voucher(4)),
 	day(27, usdt(5)),
 	day(28, lavx(5)),
 	day(29, refXp(40)),
-	day(30, usdt(50), lavx(10), voucher(5), passXp(700)),
+	day(30, usdt(50), lavx(10), voucher(5), passXp(1400), nft("epic")),
 }

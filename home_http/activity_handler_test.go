@@ -27,10 +27,10 @@ func TestDailyActivityComponents(t *testing.T) {
 	}{
 		{"start", 1, []string{"USD"}, []float64{10}},
 		{"start", 5, []string{"voucher"}, []float64{1}},
-		{"start", 2, []string{"XP"}, []float64{10}},
+		{"start", 2, []string{"XP"}, []float64{200}},
 		{"start", 4, []string{"REF XP"}, []float64{5}},
 		{"start", 30, []string{"USD", "LAVX"}, []float64{25, 5}},
-		{"pro", 30, []string{"USD", "LAVX", "voucher", "XP"}, []float64{50, 10, 5, 700}},
+		{"pro", 30, []string{"USD", "LAVX", "voucher", "XP"}, []float64{50, 10, 5, 1400}},
 	} {
 		events, err := dailyActivityEvents(71, test.track, test.day, at)
 		if err != nil {
@@ -130,7 +130,7 @@ func TestBattlepassHistoryDoesNotInventCosmetics(t *testing.T) {
 		}
 		var original []battlepass_sql.BPReward
 		for _, reward := range rewards {
-			if reward.Kind != "cosmetic" {
+			if reward.Kind != "cosmetic" && reward.Kind != "nft" {
 				original = append(original, reward)
 			}
 		}

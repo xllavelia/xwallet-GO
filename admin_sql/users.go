@@ -88,10 +88,15 @@ func GetUserDetail(ctx context.Context, pool *pgxpool.Pool, playerID string) (Us
 		return UserDetail{}, err
 	}
 
-	var track *string
-	pool.QueryRow(ctx, `SELECT track, xp FROM battlepass_progress WHERE user_id = $1;`, d.InternalID).Scan(&track, &d.BattlepassXp)
-	if track != nil {
-		d.BattlepassTrack = *track
+	// Актуальный Battle Pass — bp_profiles активного сезона, а не устаревший battlepass_progress.
+	var passOwned bool
+	if err := pool.QueryRow(ctx, `
+		SELECT p.xp, EXISTS(SELECT 1 FROM bp_passes b WHERE b.user_id = p.user_id AND b.season_id = p.season_id)
+		FROM bp_profiles p WHERE p.user_id = $1;`, d.InternalID).Scan(&d.BattlepassXp, &passOwned); err == nil {
+		d.BattlepassTrack = "Free"
+		if passOwned {
+			d.BattlepassTrack = "Pass"
+		}
 	}
 
 	pool.QueryRow(ctx, `SELECT COUNT(*) FROM positions WHERE user_id = $1 AND status = 'open';`, d.InternalID).Scan(&d.OpenPositions)
