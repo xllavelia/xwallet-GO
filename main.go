@@ -413,8 +413,10 @@ func main() {
 	positions_engine.StartTimeTradeSettler(pool)
 	p2p_sql.StartExpiryWorker(pool)
 	rocket_engine.Start(pool)
+
 	stockoracle.Start()
 	priceoracle.Start()
+
 	positions_http.StartLiquidationWorker(pool)
 	savings_sql.StartInterestWorker(pool)
 	p2p_sql.SeedOfficialListings(ctx, pool)
