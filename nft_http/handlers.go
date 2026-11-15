@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -42,7 +43,8 @@ func fail(w http.ResponseWriter, err error) {
 		errors.Is(err, nft_sql.ErrSoldOut), errors.Is(err, nft_sql.ErrDropClosed),
 		errors.Is(err, nft_sql.ErrPriceChanged):
 		writeError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, nft_sql.ErrInsufficientFunds), errors.Is(err, nft_sql.ErrInvalidPrice):
+	case errors.Is(err, nft_sql.ErrInsufficientFunds), errors.Is(err, nft_sql.ErrInvalidPrice),
+		errors.Is(err, nft_sql.ErrUpgradeGap):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		log.Printf("nft: %v", err)
@@ -145,5 +147,21 @@ func GameBuyHandler(pool *pgxpool.Pool) http.HandlerFunc {
 func PackBuyHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return handle(pool, http.MethodPost, func(r *http.Request, uid int, b body) (any, error) {
 		return nft_sql.BuyPack(r.Context(), pool, uid, b.PackID)
+	})
+}
+
+func UpgradeOptionsHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return handle(pool, http.MethodGet, func(r *http.Request, uid int, _ body) (any, error) {
+		itemID, err := strconv.ParseInt(r.URL.Query().Get("itemId"), 10, 64)
+		if err != nil || itemID <= 0 {
+			return nil, nft_sql.ErrNotFound
+		}
+		return nft_sql.UpgradeOptions(r.Context(), pool, uid, itemID)
+	})
+}
+
+func UpgradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return handle(pool, http.MethodPost, func(r *http.Request, uid int, b body) (any, error) {
+		return nft_sql.Upgrade(r.Context(), pool, uid, b.ItemID, b.TemplateID)
 	})
 }
