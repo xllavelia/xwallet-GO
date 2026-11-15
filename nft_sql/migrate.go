@@ -99,6 +99,23 @@ CREATE TABLE IF NOT EXISTS nft_meta (
 	key TEXT PRIMARY KEY,
 	applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS nft_upgrades (
+	id BIGSERIAL PRIMARY KEY,
+	user_id INT NOT NULL,
+	source_template_id TEXT NOT NULL,
+	source_serial INT NOT NULL,
+	source_value NUMERIC(14,2) NOT NULL,
+	target_template_id TEXT NOT NULL,
+	target_rarity TEXT NOT NULL,
+	target_value NUMERIC(14,2) NOT NULL,
+	chance DOUBLE PRECISION NOT NULL,
+	roll DOUBLE PRECISION NOT NULL,
+	won BOOLEAN NOT NULL,
+	item_id BIGINT REFERENCES nft_items(id) ON DELETE SET NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS nft_upgrades_user_idx ON nft_upgrades(user_id, created_at DESC);
 `
 
 func MigrateSchema(ctx context.Context, pool *pgxpool.Pool) error {

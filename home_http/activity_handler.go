@@ -65,7 +65,7 @@ func newActivityResponse() activityResponse {
 			"Daily and battle pass level rewards and pass prices use current catalogs; historical catalog versions are not recorded.",
 			"Daily voucher issuance can be skipped when slots are full; claims do not record that outcome. Battle pass level status grants or duplicate cash conversions are not recorded; status values are not counted as cash. New cosmetic rewards are not inferred from historical level claims.",
 			"Legacy TIMESTAMP fields have no stored timezone and are exposed as UTC. Rocket and Flip payouts use round ended_at; individual payout timestamps are not recorded.",
-			"NFT history follows mint and sale records. Hourly NFT income is not listed as separate events, and NFTs you no longer own appear only as sales.",
+			"NFT history follows mint, sale and upgrade records. Hourly NFT income is not listed as separate events, and NFTs you no longer own appear only as sales or upgrade attempts.",
 		},
 	}
 }
@@ -654,7 +654,7 @@ func loadNftActivity(ctx context.Context, tx pgx.Tx, userID int, response *activ
 		var serial int
 		var at time.Time
 		var value float64
-		if err := rows.Scan(&id, &name, &rarity, &source, &serial, &at, &value); err != nil {
+		if err := rows.Scan(&id, &name, &rarity, &serial, &source, &at, &value); err != nil {
 			return err
 		}
 		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:item:%d", id), nftActivitySource(source), "nft",
@@ -664,7 +664,7 @@ func loadNftActivity(ctx context.Context, tx pgx.Tx, userID int, response *activ
 	}); err != nil {
 		return err
 	}
-	return activityRows(ctx, tx, userID, `
+	if err := activityRows(ctx, tx, userID, `
 		SELECT s.id, COALESCE(t.name, s.template_id), COALESCE(t.rarity, ''), s.serial, s.kind,
 		       s.price::float8, s.created_at,
 		       CASE WHEN s.buyer_id = $1 THEN 'buy' ELSE 'sell' END
@@ -698,5 +698,46 @@ func loadNftActivity(ctx context.Context, tx pgx.Tx, userID int, response *activ
 		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:sale:%d:sell", id), "nft", "sell",
 			"Sold "+title, "USD", math.Abs(net), at, facts...))
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	if err := activityRows(ctx, tx, userID, `
+		SELECT u.id, COALESCE(st.name, u.source_template_id), u.source_serial, u.source_value::float8,
+		       COALESCE(tt.name, u.target_template_id), u.target_rarity, u.target_value::float8,
+		       u.chance, u.won, u.created_at
+		FROM nft_upgrades u
+		LEFT JOIN nft_templates st ON st.id = u.source_template_id
+		LEFT JOIN nft_templates tt ON tt.id = u.target_template_id
+		WHERE u.user_id = $1;
+	`, func(rows pgx.Rows) error {
+		var id int64
+		var fromName, toName, toRarity string
+		var fromSerial int
+		var fromValue, toValue, chance float64
+		var won bool
+		var at time.Time
+		if err := rows.Scan(&id, &fromName, &fromSerial, &fromValue, &toName, &toRarity, &toValue, &chance, &won, &at); err != nil {
+			return err
+		}
+		from := fmt.Sprintf("%s #%d", fromName, fromSerial)
+		title := "Lost " + from + " upgrading to " + toName
+		if won {
+			title = "Upgraded " + from + " to " + toName
+		}
+		result := "Lost"
+		if won {
+			result = "Won"
+		}
+		response.Events = append(response.Events, makeActivityEvent(fmt.Sprintf("nft:upgrade:%d", id), "nft", "upgrade",
+			title, "NFT", 0, at,
+			activityFactFor("Result", result),
+			activityFactFor("From", fmt.Sprintf("%s · $%.2f", from, fromValue)),
+			activityFactFor("To", fmt.Sprintf("%s · $%.2f", toName, toValue)),
+			activityFactFor("Rarity", toRarity),
+			activityFactFor("Chance", fmt.Sprintf("%.1f%%", chance*100))))
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
