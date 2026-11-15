@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
  CHECK ((avatar IS NULL) = (avatar_thumb IS NULL))
 );
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS banner BYTEA CHECK (octet_length(banner) <= 204800);
+-- Витрина профиля: до трёх NFT-снимков (id, имя, редкость, арт).
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS nft_showcase JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- Старые внешние ключи тем/эмблем мешают обновлять профиль после перехода на дизайны карточек.
 ALTER TABLE user_profiles DROP CONSTRAINT IF EXISTS user_profiles_theme_id_fkey;
 ALTER TABLE user_profiles DROP CONSTRAINT IF EXISTS user_profiles_emblem_id_fkey;

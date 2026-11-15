@@ -44,7 +44,8 @@ func fail(w http.ResponseWriter, err error) {
 		errors.Is(err, nft_sql.ErrPriceChanged):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, nft_sql.ErrInsufficientFunds), errors.Is(err, nft_sql.ErrInvalidPrice),
-		errors.Is(err, nft_sql.ErrUpgradeGap):
+		errors.Is(err, nft_sql.ErrUpgradeGap), errors.Is(err, nft_sql.ErrMergePair),
+		errors.Is(err, nft_sql.ErrMergeTrio), errors.Is(err, nft_sql.ErrMergeTop):
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		log.Printf("nft: %v", err)
@@ -54,6 +55,7 @@ func fail(w http.ResponseWriter, err error) {
 
 type body struct {
 	ItemID     int64   `json:"itemId"`
+	ItemIDs    []int64 `json:"itemIds"`
 	ListingID  int64   `json:"listingId"`
 	TemplateID string  `json:"templateId"`
 	PackID     string  `json:"packId"`
@@ -163,5 +165,14 @@ func UpgradeOptionsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 func UpgradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return handle(pool, http.MethodPost, func(r *http.Request, uid int, b body) (any, error) {
 		return nft_sql.Upgrade(r.Context(), pool, uid, b.ItemID, b.TemplateID)
+	})
+}
+
+func MergeHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return handle(pool, http.MethodPost, func(r *http.Request, uid int, b body) (any, error) {
+		if len(b.ItemIDs) == 0 && b.TemplateID == "" {
+			return nil, nft_sql.ErrNotFound
+		}
+		return nft_sql.Merge(r.Context(), pool, uid, b.TemplateID, b.ItemIDs)
 	})
 }

@@ -31,6 +31,9 @@ var (
 	ErrInvalidPrice      = errors.New("invalid price")
 	ErrDropClosed        = errors.New("this drop has ended")
 	ErrWalletMissing     = errors.New("wallet not found")
+	ErrMergePair         = errors.New("merging needs two copies of the same nft")
+	ErrMergeTrio         = errors.New("trio merge needs three different nfts of the same rarity")
+	ErrMergeTop          = errors.New("this nft is already at the top rarity")
 )
 
 type rarityConf struct {

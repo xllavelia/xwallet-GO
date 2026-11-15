@@ -15,15 +15,15 @@ import (
 )
 
 type cardResponse struct {
-	ID                 int                                `json:"id"`
-	Name               string                             `json:"name"`
-	DesignID           int                                `json:"designId"`
-	DesignKey          string                             `json:"designKey,omitempty"`
-	Custom             *bankcards_sql.CardCustomDesign    `json:"custom,omitempty"`
-	CardNumber         string                             `json:"cardNumber"`
-	Balance            float64                            `json:"balance"`
-	IsActiveForTrading bool                               `json:"isActiveForTrading"`
-	OpenedAt           string                             `json:"openedAt"`
+	ID                 int                             `json:"id"`
+	Name               string                          `json:"name"`
+	DesignID           int                             `json:"designId"`
+	DesignKey          string                          `json:"designKey,omitempty"`
+	Custom             *bankcards_sql.CardCustomDesign `json:"custom,omitempty"`
+	CardNumber         string                          `json:"cardNumber"`
+	Balance            float64                         `json:"balance"`
+	IsActiveForTrading bool                            `json:"isActiveForTrading"`
+	OpenedAt           string                          `json:"openedAt"`
 }
 
 type listResponse struct {
@@ -67,7 +67,7 @@ func writeCardError(w http.ResponseWriter, err error, fallback string) {
 		errors.Is(err, bankcards_sql.ErrInvalidAmount), errors.Is(err, bankcards_sql.ErrCustomInvalid),
 		errors.Is(err, bankcards_sql.ErrVoucherInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, bankcards_sql.ErrDesignNotOwned):
+	case errors.Is(err, bankcards_sql.ErrDesignNotOwned), errors.Is(err, bankcards_sql.ErrNFTNotOwned):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
 		writeError(w, http.StatusConflict, err.Error())
@@ -111,11 +111,11 @@ func ListHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type openRequest struct {
-	Name      string                             `json:"name"`
-	DesignID  *int                               `json:"designId"`
-	DesignKey string                             `json:"designKey"`
-	Custom    *bankcards_sql.CardCustomDesign    `json:"custom"`
-	VoucherID int                                `json:"voucherId"`
+	Name      string                          `json:"name"`
+	DesignID  *int                            `json:"designId"`
+	DesignKey string                          `json:"designKey"`
+	Custom    *bankcards_sql.CardCustomDesign `json:"custom"`
+	VoucherID int                             `json:"voucherId"`
 }
 
 // designRequest — смена оформления существующего счёта.

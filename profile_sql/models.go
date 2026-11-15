@@ -1,6 +1,7 @@
 package profile_sql
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -22,17 +23,26 @@ var (
 	ErrTransition       = errors.New("friend action is not allowed in this state")
 )
 
+// NftShowcaseItem — снимок NFT для витрины профиля.
+type NftShowcaseItem struct {
+	ItemID int64           `json:"itemId"`
+	Name   string          `json:"name"`
+	Rarity string          `json:"rarity"`
+	Art    json.RawMessage `json:"art"`
+}
+
 type PublicProfile struct {
-	PlayerID    string    `json:"playerId"`
-	Username    string    `json:"username"`
-	Bio         string    `json:"bio"`
-	AvatarURL   string    `json:"avatarUrl"`
-	BannerURL   string    `json:"bannerUrl"`
-	IsAdmin     bool      `json:"isAdmin"`
-	CreatedAt   time.Time `json:"createdAt"`
-	ShowBalance bool      `json:"showBalance"`
-	Balance     *float64  `json:"balance,omitempty"`
-	FriendState string    `json:"friendState"`
+	PlayerID    string            `json:"playerId"`
+	Username    string            `json:"username"`
+	Bio         string            `json:"bio"`
+	AvatarURL   string            `json:"avatarUrl"`
+	BannerURL   string            `json:"bannerUrl"`
+	IsAdmin     bool              `json:"isAdmin"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	ShowBalance bool              `json:"showBalance"`
+	Balance     *float64          `json:"balance,omitempty"`
+	FriendState string            `json:"friendState"`
+	NftShowcase []NftShowcaseItem `json:"nftShowcase"`
 }
 
 type OwnState struct {

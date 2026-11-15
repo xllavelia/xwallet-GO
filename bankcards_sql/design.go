@@ -29,7 +29,14 @@ var (
 	ErrCustomInvalid  = errors.New("custom design contains invalid colors or images")
 	ErrDesignNotOwned = errors.New("card design is not owned")
 	ErrVoucherInvalid = errors.New("custom voucher not found or already used")
+	ErrNFTNotOwned    = errors.New("nft is not owned")
 )
+
+var nftRarities = map[string]bool{
+	"common": true, "uncommon": true, "rare": true, "epic": true, "mythic": true, "legendary": true,
+}
+
+const nftArtMaxBytes = 2048
 
 // CardSide — одна из частей карточки: цвет и/или фотография.
 type CardSide struct {
@@ -37,14 +44,24 @@ type CardSide struct {
 	Image string `json:"image,omitempty"`
 }
 
+// CardNFTSkin — оформление карты рисунком NFT: арт слева, градиент редкости справа.
+// Арт хранится снимком: проданный NFT остаётся на карте как оформление.
+type CardNFTSkin struct {
+	ItemID int64           `json:"itemId"`
+	Name   string          `json:"name,omitempty"`
+	Rarity string          `json:"rarity"`
+	Art    json.RawMessage `json:"art"`
+}
+
 // CardCustomDesign — пользовательская карточка: левая 2/3 и правая 1/3.
 // Link объединяет части: левая заливка и цвет текста действуют на всю карту.
 type CardCustomDesign struct {
-	Left       CardSide `json:"left"`
-	Right      CardSide `json:"right"`
-	Ink        string   `json:"ink,omitempty"`
-	InkOpacity *float64 `json:"inkOpacity,omitempty"`
-	Link       bool     `json:"link"`
+	NFT        *CardNFTSkin `json:"nft,omitempty"`
+	Left       CardSide     `json:"left"`
+	Right      CardSide     `json:"right"`
+	Ink        string       `json:"ink,omitempty"`
+	InkOpacity *float64     `json:"inkOpacity,omitempty"`
+	Link       bool         `json:"link"`
 }
 
 // DesignChoice — выбор оформления: базовый дизайн, разблокированный или кастомный.
@@ -91,6 +108,24 @@ func validateCustomImage(dataURL string) (string, error) {
 	return dataURL, nil
 }
 
+// validateNFTSkin проверяет снимок NFT-оформления; арт приходит с клиента.
+func validateNFTSkin(skin *CardNFTSkin) (*CardNFTSkin, error) {
+	if skin == nil {
+		return nil, nil
+	}
+	if skin.ItemID <= 0 || !nftRarities[skin.Rarity] {
+		return nil, ErrCustomInvalid
+	}
+	if len(skin.Art) == 0 || len(skin.Art) > nftArtMaxBytes || !json.Valid(skin.Art) {
+		return nil, ErrCustomInvalid
+	}
+	name := strings.TrimSpace(skin.Name)
+	if len(name) > 64 || strings.ContainsAny(name, "\x00\r\n\t") {
+		return nil, ErrCustomInvalid
+	}
+	return &CardNFTSkin{ItemID: skin.ItemID, Name: name, Rarity: skin.Rarity, Art: skin.Art}, nil
+}
+
 // ValidateCustomDesign проверяет и нормализует кастомный дизайн.
 func ValidateCustomDesign(custom *CardCustomDesign) (*CardCustomDesign, error) {
 	if custom == nil {
@@ -101,6 +136,15 @@ func ValidateCustomDesign(custom *CardCustomDesign) (*CardCustomDesign, error) {
 	}
 	out := &CardCustomDesign{Link: custom.Link, Ink: custom.Ink, InkOpacity: custom.InkOpacity}
 	var err error
+	if out.NFT, err = validateNFTSkin(custom.NFT); err != nil {
+		return nil, err
+	}
+	if out.NFT != nil {
+		// NFT-скин рисуется целиком: цвета, фото и текст не используются.
+		out.Link, out.Ink, out.InkOpacity = false, "", nil
+		out.Left, out.Right = CardSide{}, CardSide{}
+		return out, nil
+	}
 	if out.Left.Color, err = NormalizeHexColor(custom.Left.Color); err != nil {
 		return nil, err
 	}
@@ -218,6 +262,28 @@ WHERE user_id=$1 AND lavx_balance >= $2`, userID, price)
 	return nil
 }
 
+// verifyNFTSkin проверяет, что оформление взято из собственного инвентаря.
+func verifyNFTSkin(ctx context.Context, tx pgx.Tx, userID int, custom *CardCustomDesign) error {
+	if custom == nil || custom.NFT == nil {
+		return nil
+	}
+	var owned bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM nft_items WHERE id=$1 AND owner_id=$2)`,
+		custom.NFT.ItemID, userID).Scan(&owned); err != nil {
+		return err
+	}
+	if !owned {
+		return ErrNFTNotOwned
+	}
+	return nil
+}
+
+// customIsPaid: NFT-скин бесплатен, платна только ручная кастомизация.
+func customIsPaid(custom *CardCustomDesign) bool {
+	return custom != nil && custom.NFT == nil
+}
+
 func customJSON(custom *CardCustomDesign) any {
 	if custom == nil {
 		return nil
@@ -274,7 +340,10 @@ func OpenCardEx(ctx context.Context, pool *pgxpool.Pool, userID int, name string
 	if err != nil {
 		return Card{}, err
 	}
-	if choice.Custom != nil {
+	if err := verifyNFTSkin(ctx, tx, userID, choice.Custom); err != nil {
+		return Card{}, err
+	}
+	if customIsPaid(choice.Custom) {
 		if err := chargeCustomTx(ctx, tx, userID, isAdmin, voucherID); err != nil {
 			return Card{}, err
 		}
@@ -306,7 +375,10 @@ func SetCardDesign(ctx context.Context, pool *pgxpool.Pool, userID, cardID int, 
 	if err := lockOwnedCard(ctx, tx, userID, cardID); err != nil {
 		return Card{}, err
 	}
-	if choice.Custom != nil {
+	if err := verifyNFTSkin(ctx, tx, userID, choice.Custom); err != nil {
+		return Card{}, err
+	}
+	if customIsPaid(choice.Custom) {
 		if err := chargeCustomTx(ctx, tx, userID, isAdmin, voucherID); err != nil {
 			return Card{}, err
 		}

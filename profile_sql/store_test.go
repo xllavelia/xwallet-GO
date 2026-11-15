@@ -121,7 +121,7 @@ func TestUpdateKeepsExistingNames(t *testing.T) {
 					checks++
 					return testRow{values: []any{tc.taken}}
 				case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-					return testRow{values: []any{1, "123456", current, "New bio", nil, nil, false, time.Unix(0, 0).UTC(), false, nil, nil, nil}}
+					return testRow{values: []any{1, "123456", current, "New bio", nil, nil, false, time.Unix(0, 0).UTC(), false, nil, nil, nil, nil}}
 				case strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 					return testRow{values: []any{100.0}}
 				default:
@@ -234,7 +234,7 @@ func purchaseScript(t *testing.T, balance float64, owned, conflict bool, debitEr
 		case strings.HasPrefix(q, "SELECT "+bannedSQL):
 			return testRow{values: []any{false}}
 		case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-			return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 42.0, nil, nil}}
+			return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 42.0, nil, nil, []byte("[]")}}
 		case strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 			return testRow{values: []any{balance}}
 		default:
@@ -379,7 +379,7 @@ func TestPrivateAccountValidity(t *testing.T) {
 }
 
 func TestPublicScannerRedactsAndUsesInlineJPEG(t *testing.T) {
-	row := testRow{values: []any{2, "654321", "Player", "", []byte{0xff, 0xd8, 0xff}, nil, false, time.Unix(0, 0).UTC(), false, 123.0, 2, "pending"}}
+	row := testRow{values: []any{2, "654321", "Player", "", []byte{0xff, 0xd8, 0xff}, nil, false, time.Unix(0, 0).UTC(), false, 123.0, 2, "pending", []byte(`[]`)}}
 	p, err := scanPublic(row, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -433,7 +433,7 @@ func (tx *memoryPurchaseTx) QueryRow(_ context.Context, q string, args ...any) p
 	case q == lockWalletSQL || strings.Contains(q, "SELECT lavx_balance::double precision FROM wallets"):
 		return testRow{values: []any{tx.balance}}
 	case strings.Contains(q, "SELECT u.id,u.player_id,u.username,"):
-		return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 0.0, nil, nil}}
+		return testRow{values: []any{1, "123456", "Player", "", nil, nil, false, time.Unix(0, 0).UTC(), true, 0.0, nil, nil, []byte("[]")}}
 	}
 	return testRow{err: fmt.Errorf("unexpected query %s", q)}
 }

@@ -371,6 +371,7 @@ func main() {
 	http.HandleFunc("/nft/packs/buy", auth_http.WithCORS(auth_http.RequireAuth(nft_http.PackBuyHandler(pool))))
 	http.HandleFunc("/nft/upgrade", auth_http.WithCORS(auth_http.RequireAuth(nft_http.UpgradeOptionsHandler(pool))))
 	http.HandleFunc("/nft/upgrade/run", auth_http.WithCORS(auth_http.RequireAuth(nft_http.UpgradeHandler(pool))))
+	http.HandleFunc("/nft/merge/run", auth_http.WithCORS(auth_http.RequireAuth(nft_http.MergeHandler(pool))))
 	http.HandleFunc("/flip/state", auth_http.WithCORS(auth_http.RequireAuth(flip_http.StateHandler(pool))))
 	http.HandleFunc("/flip/bet", auth_http.WithCORS(auth_http.RequireAuth(flip_http.BetHandler(pool))))
 	http.HandleFunc("/ticket/state", auth_http.WithCORS(auth_http.RequireAuth(ticket_http.StateHandler(pool))))

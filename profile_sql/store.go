@@ -3,6 +3,7 @@ package profile_sql
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -88,7 +89,7 @@ func publicColumns(thumb bool) string {
 	return `u.id,u.player_id,u.username,COALESCE(p.bio,''),` + avatar + `,p.banner,
 u.is_admin,u.created_at,COALESCE(p.show_balance,true),
 CASE WHEN COALESCE(p.show_balance,true) THEN w.balance::double precision ELSE NULL END,
-f.requester_id,f.state`
+f.requester_id,f.state,COALESCE(p.nft_showcase,'[]'::jsonb)`
 }
 
 const publicJoins = ` FROM users u
@@ -103,10 +104,11 @@ func scanPublic(row scanner, viewerID int, rank *int) (PublicProfile, error) {
 	var id int
 	var avatar []byte
 	var banner []byte
+	var showcaseRaw []byte
 	var requester *int
 	var state *string
 	args := []any{&id, &p.PlayerID, &p.Username, &p.Bio, &avatar, &banner,
-		&p.IsAdmin, &p.CreatedAt, &p.ShowBalance, &p.Balance, &requester, &state}
+		&p.IsAdmin, &p.CreatedAt, &p.ShowBalance, &p.Balance, &requester, &state, &showcaseRaw}
 	if rank != nil {
 		args = append(args, rank)
 	}
@@ -118,6 +120,12 @@ func scanPublic(row scanner, viewerID int, rank *int) (PublicProfile, error) {
 	}
 	if len(banner) > 0 {
 		p.BannerURL = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(banner)
+	}
+	p.NftShowcase = []NftShowcaseItem{}
+	if len(showcaseRaw) > 0 {
+		if err := json.Unmarshal(showcaseRaw, &p.NftShowcase); err != nil {
+			return p, err
+		}
 	}
 	if !p.ShowBalance {
 		p.Balance = nil // Скрываем баланс даже при ошибке в SQL-проекции.
@@ -256,7 +264,67 @@ AND (lower(username)=lower($2) OR player_id=$2))`, a.id, in.Username).Scan(&take
 	})
 }
 
+// Showcase сохраняет до трёх собственных NFT как витрину профиля; порядок = порядок карточек.
+func (s *Store) Showcase(ctx context.Context, player string, ids []int64) (OwnState, error) {
+	unique := make([]int64, 0, len(ids))
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if id <= 0 {
+			return OwnState{}, ErrInvalid
+		}
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	if len(unique) > 3 {
+		return OwnState{}, ErrInvalid
+	}
+	return s.mutate(ctx, player, func(tx pgx.Tx, a account) error {
+		items := make([]NftShowcaseItem, 0, len(unique))
+		if len(unique) > 0 {
+			rows, err := tx.Query(ctx, `
+SELECT i.id, t.name, t.rarity, t.art FROM nft_items i
+JOIN nft_templates t ON t.id = i.template_id
+WHERE i.owner_id=$1 AND i.id = ANY($2)`, a.id, unique)
+			if err != nil {
+				return err
+			}
+			found := map[int64]NftShowcaseItem{}
+			for rows.Next() {
+				var it NftShowcaseItem
+				if err := rows.Scan(&it.ItemID, &it.Name, &it.Rarity, &it.Art); err != nil {
+					rows.Close()
+					return err
+				}
+				found[it.ItemID] = it
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			for _, id := range unique {
+				it, ok := found[id]
+				if !ok {
+					return ErrNotOwned
+				}
+				items = append(items, it)
+			}
+		}
+		raw, err := json.Marshal(items)
+		if err != nil {
+			return err
+		}
+		if err := ensureProfile(ctx, tx, a.id); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE user_profiles SET nft_showcase=$2,updated_at=now() WHERE user_id=$1`, a.id, raw)
+		return err
+	})
+}
+
 const lockWalletSQL = `SELECT lavx_balance::double precision FROM wallets WHERE user_id=$1 FOR UPDATE`
+
 const debitWalletSQL = `UPDATE wallets SET lavx_balance=lavx_balance-$2,updated_at=now()
 WHERE user_id=$1 AND lavx_balance >= $2`
 

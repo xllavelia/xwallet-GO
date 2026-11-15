@@ -22,6 +22,7 @@ type service interface {
 	View(context.Context, string, string) (profile_sql.PublicProfile, error)
 	SetAvatar(context.Context, string, []byte, []byte) (profile_sql.OwnState, error)
 	SetBanner(context.Context, string, []byte) (profile_sql.OwnState, error)
+	Showcase(context.Context, string, []int64) (profile_sql.OwnState, error)
 	Community(context.Context, string) (profile_sql.CommunityState, error)
 	Search(context.Context, string, string) ([]profile_sql.PublicProfile, error)
 	Friend(context.Context, string, string, string) (profile_sql.Relationship, error)
@@ -38,8 +39,9 @@ func register(mux *http.ServeMux, store service) {
 	for path, handler := range map[string]http.HandlerFunc{
 		"/profile": h.profile, "/profile/update": h.update,
 		"/profile/purchase": h.purchase,
-		"/profile/view": h.view, "/profile/avatar": h.avatar, "/profile/banner": h.banner,
-		"/community": h.community, "/community/search": h.search,
+		"/profile/view":     h.view, "/profile/avatar": h.avatar, "/profile/banner": h.banner,
+		"/profile/showcase": h.showcase,
+		"/community":        h.community, "/community/search": h.search,
 		"/community/friend": h.friend,
 	} {
 		mux.HandleFunc(path, auth_http.WithCORS(auth_http.RequireAuth(handler)))
@@ -171,6 +173,26 @@ func (h handlers) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, err := h.store.Update(r.Context(), player, in)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	respond(w, state)
+}
+
+// showcase сохраняет витрину из до трёх NFT из собственного инвентаря.
+func (h handlers) showcase(w http.ResponseWriter, r *http.Request) {
+	player, ok := playerFor(w, r, http.MethodPost)
+	if !ok {
+		return
+	}
+	var req struct {
+		ItemIDs []int64 `json:"itemIds"`
+	}
+	if !decodeRequest(w, r, 4*1024, &req) {
+		return
+	}
+	state, err := h.store.Showcase(r.Context(), player, req.ItemIDs)
 	if err != nil {
 		respondError(w, err)
 		return

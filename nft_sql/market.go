@@ -279,12 +279,18 @@ WHERE l.id IS NOT NULL ORDER BY l.created_at DESC LIMIT 200`)
 		return nil, err
 	}
 
+	// Номер считаем как в mintTx: сожжённые экземпляры освобождают младшие места тиража, иначе цена витрины разойдётся с покупкой.
 	rows, err = pool.Query(ctx, `
 SELECT t.id, t.name, t.rarity, t.art, c.id, c.name, c.theme, t.base_price::float8, t.income_hour::float8,
-       t.supply, t.minted, g.mult::float8, g.stock - g.sold
+       t.supply, t.minted, g.mult::float8, g.stock - g.sold, COALESCE(nx.free_serial, t.minted + 1)
 FROM nft_game_listings g
 JOIN nft_templates t ON t.id = g.template_id
 JOIN nft_collections c ON c.id = t.collection_id
+CROSS JOIN LATERAL (
+  SELECT min(s) AS free_serial
+  FROM generate_series(1, t.supply) AS s(s)
+  WHERE NOT EXISTS (SELECT 1 FROM nft_items i WHERE i.template_id = t.id AND i.serial = s)
+) nx
 WHERE g.day = $1::date AND g.sold < g.stock AND t.minted < t.supply AND c.ends_at > now()
 ORDER BY t.base_price`, now.Format("2006-01-02"))
 	if err != nil {
@@ -294,11 +300,10 @@ ORDER BY t.base_price`, now.Format("2006-01-02"))
 		var g GameListingView
 		var mult float64
 		if err = rows.Scan(&g.TemplateID, &g.Name, &g.Rarity, &g.Art, &g.Collection.ID, &g.Collection.Name, &g.Collection.Theme,
-			&g.BasePrice, &g.IncomeHour, &g.Supply, &g.Minted, &mult, &g.Left); err != nil {
+			&g.BasePrice, &g.IncomeHour, &g.Supply, &g.Minted, &mult, &g.Left, &g.NextSerial); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		g.NextSerial = g.Minted + 1
 		g.Value = ItemValue(g.BasePrice, g.NextSerial)
 		g.Price = gamePrice(g.BasePrice, g.NextSerial, mult)
 		g.Left = min(g.Left, g.Supply-g.Minted)

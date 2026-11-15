@@ -194,9 +194,21 @@ UPDATE nft_stats SET carry = carry - $2, earned = earned + $2 WHERE user_id = $1
 }
 
 func mintTx(ctx context.Context, tx pgx.Tx, userID int, templateID, source string) (int64, int, error) {
-	var serial int
+	var supply, serial int
+	// UPDATE сразу блокирует строку шаблона: проверка тиража и выбор номера идут согласованно.
 	err := tx.QueryRow(ctx, `
-UPDATE nft_templates SET minted = minted + 1 WHERE id = $1 AND minted < supply RETURNING minted`, templateID).Scan(&serial)
+UPDATE nft_templates SET minted = minted + 1 WHERE id = $1 AND minted < supply RETURNING supply`, templateID).Scan(&supply)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, ErrSoldOut
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	// Сожжённые экземпляры освобождают номер, поэтому берём наименьшее свободное место тиража.
+	err = tx.QueryRow(ctx, `
+SELECT g FROM generate_series(1, $2::int) g
+LEFT JOIN nft_items i ON i.template_id = $1 AND i.serial = g
+WHERE i.id IS NULL ORDER BY g LIMIT 1`, templateID, supply).Scan(&serial)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, ErrSoldOut
 	}
@@ -354,7 +366,7 @@ type SellResult struct {
 	Price  float64 `json:"price"`
 }
 
-// InstantSell продаёт NFT системе за 80% оценки; экземпляр сжигается, тираж не восстанавливается.
+// InstantSell продаёт NFT системе за 80% оценки; экземпляр сжигается и освобождает место в тираже.
 func InstantSell(ctx context.Context, pool *pgxpool.Pool, userID int, itemID int64) (*SellResult, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -390,6 +402,11 @@ WHERE i.id = $1 FOR UPDATE OF i`, itemID).Scan(&owner, &serial, &templateID, &ba
 		return nil, err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM nft_items WHERE id = $1`, itemID); err != nil {
+		return nil, err
+	}
+	// Сожжённая копия освобождает слот тиража — такую же можно выбить снова.
+	if _, err = tx.Exec(ctx, `
+UPDATE nft_templates SET minted = minted - 1 WHERE id = $1 AND minted > 0`, templateID); err != nil {
 		return nil, err
 	}
 	if _, err = tx.Exec(ctx, `

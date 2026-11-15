@@ -109,7 +109,7 @@ func TestCardDesignColors(t *testing.T) {
 
 func TestPublicProfileRedaction(t *testing.T) {
 	balance := 123.0
-	p := PublicProfile{PlayerID: "123456", Username: "Player", ShowBalance: false, Balance: nil, FriendState: "none"}
+	p := PublicProfile{PlayerID: "123456", Username: "Player", ShowBalance: false, Balance: nil, FriendState: "none", NftShowcase: []NftShowcaseItem{}}
 	data, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestPublicProfileRedaction(t *testing.T) {
 			t.Fatalf("private property: %s", key)
 		}
 	}
-	if len(obj) != 9 {
+	if len(obj) != 10 {
 		t.Fatalf("unexpected public schema: %s", data)
 	}
 	p.ShowBalance, p.Balance = true, &balance

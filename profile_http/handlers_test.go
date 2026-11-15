@@ -61,6 +61,10 @@ func (s *stubService) SetBanner(_ context.Context, p string, b []byte) (profile_
 	s.banner = b
 	return s.state(), s.err
 }
+func (s *stubService) Showcase(_ context.Context, p string, ids []int64) (profile_sql.OwnState, error) {
+	s.touch(p)
+	return s.state(), s.err
+}
 func (s *stubService) Community(_ context.Context, p string) (profile_sql.CommunityState, error) {
 	s.touch(p)
 	return profile_sql.CommunityState{
