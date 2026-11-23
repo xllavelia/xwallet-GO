@@ -67,7 +67,7 @@ func writeCardError(w http.ResponseWriter, err error, fallback string) {
 		errors.Is(err, bankcards_sql.ErrInvalidAmount), errors.Is(err, bankcards_sql.ErrCustomInvalid),
 		errors.Is(err, bankcards_sql.ErrVoucherInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, bankcards_sql.ErrDesignNotOwned), errors.Is(err, bankcards_sql.ErrNFTNotOwned):
+	case errors.Is(err, bankcards_sql.ErrDesignNotOwned):
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, bankcards_sql.ErrMaxCardsReached), errors.Is(err, bankcards_sql.ErrCardFunded), errors.Is(err, bankcards_sql.ErrCardHasOpenPositions):
 		writeError(w, http.StatusConflict, err.Error())
@@ -131,6 +131,7 @@ func designChoiceFromRequest(designID *int, designKey string, custom *bankcards_
 	choice := bankcards_sql.DesignChoice{DesignKey: designKey, Custom: custom}
 	if designID != nil {
 		choice.DesignID = *designID
+		choice.DesignIDSet = true
 	}
 	return choice
 }
@@ -168,7 +169,8 @@ func OpenHandler(pool *pgxpool.Pool) http.HandlerFunc {
 }
 
 type customChargeRequest struct {
-	VoucherID int `json:"voucherId"`
+	VoucherID int                             `json:"voucherId"`
+	Custom    *bankcards_sql.CardCustomDesign `json:"custom"`
 }
 
 // CustomChargeHandler оплачивает кастомный дизайн кошелька: карточки у главного счёта нет.
@@ -184,8 +186,13 @@ func CustomChargeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req customChargeRequest
-		if err := decodeRequest(w, r, &req); err != nil || req.VoucherID < 0 {
+		if err := decodeRequestLimit(w, r, &req, 512*1024); err != nil || req.VoucherID < 0 {
 			writeError(w, http.StatusBadRequest, "invalid request")
+			return
+		}
+		custom, err := bankcards_sql.ValidateCustomDesign(req.Custom)
+		if err != nil || custom == nil {
+			writeCardError(w, bankcards_sql.ErrCustomInvalid, "invalid custom design")
 			return
 		}
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
@@ -193,11 +200,15 @@ func CustomChargeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "user not found")
 			return
 		}
-		if err := bankcards_sql.ChargeCustomDesign(r.Context(), pool, userID, req.VoucherID); err != nil {
+		custom, err = bankcards_sql.ChargeCustomDesign(r.Context(), pool, userID, req.VoucherID, custom)
+		if err != nil {
 			writeCardError(w, err, "could not charge custom design")
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Custom *bankcards_sql.CardCustomDesign `json:"custom"`
+		}{Custom: custom})
 	}
 }
 
