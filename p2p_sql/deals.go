@@ -3,6 +3,7 @@ package p2p_sql
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"xwallet-server/bankcards_sql"
@@ -72,8 +73,6 @@ func getDealForUpdate(ctx context.Context, tx pgx.Tx, dealID int) (Deal, error) 
 }
 
 func ConfirmDeal(ctx context.Context, pool *pgxpool.Pool, actingUserID int, dealID int) error {
-	posterFundingCache := map[int]bankcards_sql.FundingSource{}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -87,8 +86,8 @@ func ConfirmDeal(ctx context.Context, pool *pgxpool.Pool, actingUserID int, deal
 		}
 		return err
 	}
-	if d.TakerUserID != actingUserID && d.PosterUserID != actingUserID {
-		return ErrDealNotFound
+	if actingUserID != d.TakerUserID {
+		return ErrOnlyTakerCanConfirm
 	}
 	if d.Status != "awaiting_payment" {
 		return ErrDealNotPending
@@ -97,15 +96,23 @@ func ConfirmDeal(ctx context.Context, pool *pgxpool.Pool, actingUserID int, deal
 		return ErrDealExpired
 	}
 
-	posterFunding, err := bankcards_sql.ResolveFundingSource(ctx, pool, d.PosterUserID)
+	posterFunding, err := bankcards_sql.ResolveFundingSource(ctx, tx, d.PosterUserID)
 	if err != nil {
 		return err
 	}
-	takerFunding, err := bankcards_sql.ResolveFundingSource(ctx, pool, d.TakerUserID)
+	takerFunding, err := bankcards_sql.ResolveFundingSource(ctx, tx, d.TakerUserID)
 	if err != nil {
 		return err
 	}
-	posterFundingCache[d.PosterUserID] = posterFunding
+	fundingSources := []bankcards_sql.FundingSource{posterFunding, takerFunding}
+	sort.Slice(fundingSources, func(i, j int) bool {
+		return fundingSources[i].UserID < fundingSources[j].UserID
+	})
+	for _, source := range fundingSources {
+		if err := bankcards_sql.LockFundingSource(ctx, tx, source); err != nil {
+			return err
+		}
+	}
 
 	if d.Side == "sell" {
 		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, takerFunding, -d.QuoteAmountUsd); err != nil {
@@ -227,7 +234,10 @@ func GetDealDetail(ctx context.Context, pool *pgxpool.Pool, userID int, dealID i
 		WHERE d.id = $1 AND (d.poster_user_id = $2 OR d.taker_user_id = $2);
 	`, dealID, userID).Scan(&d.ID, &d.ListingID, &d.PosterUserID, &d.TakerUserID, &d.Side, &d.BaseAsset, &d.AssetClass, &d.BaseAmount, &d.QuoteAmountUsd, &d.RateUsd, &d.CommissionUsd, &d.Status, &d.ExpiresAt, &d.CompletedAt, &d.CreatedAt, &d.PosterUsername, &d.TakerUsername)
 	if err != nil {
-		return DealWithParty{}, ErrDealNotFound
+		if errors.Is(err, pgx.ErrNoRows) {
+			return DealWithParty{}, ErrDealNotFound
+		}
+		return DealWithParty{}, err
 	}
 	return d, nil
 }

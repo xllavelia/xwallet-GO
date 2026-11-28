@@ -24,24 +24,23 @@ func GetMerchantStatus(ctx context.Context, pool *pgxpool.Pool, userID int) (*Me
 }
 
 func BecomeMerchant(ctx context.Context, pool *pgxpool.Pool, userID int) error {
-	existing, err := GetMerchantStatus(ctx, pool, userID)
-	if err != nil {
-		return err
-	}
-	if existing != nil {
-		return ErrAlreadyMerchant
-	}
-
-	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-	if err != nil {
-		return err
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM p2p_merchants WHERE user_id=$1);`, userID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return ErrAlreadyMerchant
+	}
+	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
 
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, -DepositAmountUsd); err != nil {
 		if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
@@ -58,19 +57,6 @@ func BecomeMerchant(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 }
 
 func WithdrawMerchantDeposit(ctx context.Context, pool *pgxpool.Pool, userID int) error {
-	var activeCount int
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM p2p_listings WHERE user_id=$1 AND status='active';`, userID).Scan(&activeCount); err != nil {
-		return err
-	}
-	if activeCount > 0 {
-		return ErrHasActiveListings
-	}
-
-	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-	if err != nil {
-		return err
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -79,6 +65,17 @@ func WithdrawMerchantDeposit(ctx context.Context, pool *pgxpool.Pool, userID int
 
 	var deposit float64
 	if err := tx.QueryRow(ctx, `SELECT deposit_amount FROM p2p_merchants WHERE user_id=$1 FOR UPDATE;`, userID).Scan(&deposit); err != nil {
+		return err
+	}
+	var activeCount int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM p2p_listings WHERE user_id=$1 AND status='active';`, userID).Scan(&activeCount); err != nil {
+		return err
+	}
+	if activeCount > 0 {
+		return ErrHasActiveListings
+	}
+	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+	if err != nil {
 		return err
 	}
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, deposit); err != nil {

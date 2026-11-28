@@ -2,7 +2,9 @@ package p2p_http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 
 	"xwallet-server/auth_http"
 	"xwallet-server/p2p_sql"
@@ -89,6 +91,32 @@ func ListListingsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(items)
+	}
+}
+
+func ListingDetailHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, ok := getUserID(r, pool)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id, err := strconv.Atoi(r.URL.Query().Get("id"))
+		if err != nil {
+			http.Error(w, "invalid listing id", http.StatusBadRequest)
+			return
+		}
+		listing, err := p2p_sql.GetListingDetail(r.Context(), pool, id, userID)
+		if err != nil {
+			if errors.Is(err, p2p_sql.ErrListingNotFound) {
+				http.Error(w, "listing not found or no longer active", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "could not load listing", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(toListingDTO(listing))
 	}
 }
 
@@ -180,7 +208,12 @@ func CloseListingHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		if err := p2p_sql.CloseListing(r.Context(), pool, userID, req.ListingID); err != nil {
-			http.Error(w, "could not close listing", http.StatusInternalServerError)
+			switch err {
+			case p2p_sql.ErrListingHasActiveDeals:
+				http.Error(w, "cannot close a listing with an active deal", http.StatusConflict)
+			default:
+				http.Error(w, "could not close listing", http.StatusInternalServerError)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusOK)

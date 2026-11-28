@@ -6,8 +6,6 @@ import (
 	"math/rand"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"xwallet-server/wallet_sql"
 )
 
 // ============================================================
@@ -67,21 +65,43 @@ func ActionBuyPack(ctx context.Context, pool *pgxpool.Pool, userID int, packID s
 	if pack == nil {
 		return errors.New("unknown pack")
 	}
-	balance, err := wallet_sql.GetBalanceByUserID(ctx, pool, userID)
+	tx, err := pool.Begin(ctx)
 	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Профиль блокируется до чтения кошелька и изменения спинов.
+	if _, err := getOrCreateProfileTx(ctx, tx, userID); err != nil {
+		return err
+	}
+	var balance float64
+	if err := tx.QueryRow(ctx, `SELECT balance FROM wallets WHERE user_id = $1;`, userID).Scan(&balance); err != nil {
 		return err
 	}
 	if balance < pack.Price {
 		return errors.New("insufficient funds")
 	}
-	if err := wallet_sql.AdjustBalance(ctx, pool, userID, -pack.Price); err != nil {
+	tag, err := tx.Exec(ctx, `
+UPDATE wallets SET balance = balance - $2, updated_at = now()
+WHERE user_id = $1 AND balance >= $2;`, userID, pack.Price)
+	if err != nil {
 		return err
 	}
-	_, err = pool.Exec(ctx, `
+	if tag.RowsAffected() != 1 {
+		return errors.New("insufficient funds")
+	}
+	tag, err = tx.Exec(ctx, `
 UPDATE slots_profiles
 SET spins = spins + $2, wager_pool = wager_pool + $3
 WHERE user_id = $1;`, userID, pack.Spins, pack.Price)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("slots profile not found")
+	}
+	return tx.Commit(ctx)
 }
 
 // ============================================================
@@ -213,7 +233,13 @@ func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID str
 		return SpinOutcome{}, err
 	}
 
-	profile, err := GetOrCreateProfile(ctx, pool, userID)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return SpinOutcome{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	profile, err := getOrCreateProfileTx(ctx, tx, userID)
 	if err != nil {
 		return SpinOutcome{}, err
 	}
@@ -222,21 +248,21 @@ func ActionSpin(ctx context.Context, pool *pgxpool.Pool, userID int, levelID str
 		return SpinOutcome{}, errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	// Атомарное списание стоимости ВСЕХ линий — защита от двойного клика.
-	var spinsLeft int
-	var poolLeft float64
-	err = pool.QueryRow(ctx, `
+	// Условное списание стоимости ВСЕХ линий. Профиль уже заблокирован,
+	// а RowsAffected дополнительно защищает от потери спинов.
+	tag, err := tx.Exec(ctx, `
 UPDATE slots_profiles SET spins = spins - $2
-WHERE user_id = $1 AND spins >= $2
-RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
+WHERE user_id = $1 AND spins >= $2;`, userID, cost)
 	if err != nil {
+		return SpinOutcome{}, err
+	}
+	if tag.RowsAffected() != 1 {
 		return SpinOutcome{}, errors.New("not enough spins — buy a pack in the shop")
 	}
 
-	// spinsLeft/poolLeft — уже после списания; возвращаем cost, чтобы счётчик
-	// линий стартовал с предспинового баланса.
-	spinsRun := spinsLeft + cost
-	poolRun := poolLeft
+	// Счётчик линий стартует с предспинового баланса.
+	spinsRun := profile.Spins
+	poolRun := profile.WagerPool
 
 	results := make([]lineResult, 0, lines)
 	totalWin := 0.0
@@ -293,65 +319,82 @@ RETURNING spins, wager_pool;`, userID, cost).Scan(&spinsLeft, &poolLeft)
 	totalWin = round2(totalWin)
 	totalWagered = round2(totalWagered)
 
-	// Суммарная выплата на кошелёк одной проводкой.
+	// Суммарная выплата на кошелёк одной проводкой. Любая последующая
+	// ошибка откатит и выплату, и списанные спины.
 	if totalWin > 0 {
-		if err := wallet_sql.AdjustBalance(ctx, pool, userID, totalWin); err != nil {
+		tag, err := tx.Exec(ctx, `
+UPDATE wallets SET balance = balance + $2, updated_at = now()
+WHERE user_id = $1;`, userID, totalWin)
+		if err != nil {
 			return SpinOutcome{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return SpinOutcome{}, errors.New("wallet not found")
 		}
 	}
 
-	// Бонусные спины событий (могли выпасть сразу на нескольких линиях).
-	if bonusSpins > 0 {
-		if _, err := pool.Exec(ctx, `
-UPDATE slots_profiles SET spins = spins + $2 WHERE user_id = $1;`,
-			userID, bonusSpins); err != nil {
-			return SpinOutcome{}, err
-		}
-	}
-
-	if _, err := pool.Exec(ctx, `
+	// Бонусные спины событий могли выпасть сразу на нескольких линиях.
+	tag, err = tx.Exec(ctx, `
 UPDATE slots_profiles SET
-    wager_pool = $2, total_spins = total_spins + $3, total_wins = total_wins + $4,
-    total_winnings = total_winnings + $5, total_wagered = total_wagered + $6,
-    biggest_win = $7, current_streak = $8, best_streak = $9
+    spins = spins + $2, wager_pool = $3,
+    total_spins = total_spins + $4, total_wins = total_wins + $5,
+    total_winnings = total_winnings + $6, total_wagered = total_wagered + $7,
+    biggest_win = $8, current_streak = $9, best_streak = $10
 WHERE user_id = $1;`,
-		userID, poolRun, lines, wins, totalWin, totalWagered,
-		biggestWin, streak, bestStreak); err != nil {
+		userID, bonusSpins, poolRun, lines, wins, totalWin, totalWagered,
+		biggestWin, streak, bestStreak)
+	if err != nil {
 		return SpinOutcome{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return SpinOutcome{}, errors.New("slots profile not found")
 	}
 
 	// Дневная статистика: каждая линия считается за спин.
-	if _, err := pool.Exec(ctx, `
+	tag, err = tx.Exec(ctx, `
 INSERT INTO slots_daily (user_id, day, spins, wins, winnings)
 VALUES ($1, CURRENT_DATE, $2, $3, $4)
 ON CONFLICT (user_id, day) DO UPDATE SET
     spins = slots_daily.spins + EXCLUDED.spins,
     wins = slots_daily.wins + EXCLUDED.wins,
     winnings = slots_daily.winnings + EXCLUDED.winnings;`,
-		userID, lines, wins, totalWin); err != nil {
+		userID, lines, wins, totalWin)
+	if err != nil {
 		return SpinOutcome{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return SpinOutcome{}, errors.New("update slots daily stats failed")
 	}
 
 	// По записи истории на каждую линию, в порядке строк машины сверху вниз
 	// (фронт читает history DESC и разворачивает обратно).
 	for _, res := range results {
-		if _, err := pool.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 INSERT INTO slots_history (user_id, level_id, reels, win, event, lines)
 VALUES ($1, $2, $3, $4, $5, $6);`,
 			userID, level.ID, res.reels[0]+","+res.reels[1]+","+res.reels[2],
-			res.win, res.event, lines); err != nil {
+			res.win, res.event, lines)
+		if err != nil {
 			return SpinOutcome{}, err
+		}
+		if tag.RowsAffected() != 1 {
+			return SpinOutcome{}, errors.New("insert slots history failed")
 		}
 	}
 
-	_, _ = pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 DELETE FROM slots_history
 WHERE user_id = $1
   AND id NOT IN (
       SELECT id FROM slots_history
       WHERE user_id = $1 ORDER BY id DESC LIMIT $2
-  );`, userID, HistoryKeepLimit)
+  );`, userID, HistoryKeepLimit); err != nil {
+		return SpinOutcome{}, err
+	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return SpinOutcome{}, err
+	}
 	return SpinOutcome{
 		Lines:        lines,
 		TotalWin:     totalWin,

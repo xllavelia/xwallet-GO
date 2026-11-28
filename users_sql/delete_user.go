@@ -23,6 +23,10 @@ func isSkippableSchemaError(err error) bool {
 // Удаляются первыми: ссылаются на users через колонки с другими именами.
 // p2p_deals обязан идти до p2p_listings.
 var childQueries = []string{
+	`DELETE FROM nft_upgrades WHERE user_id = $1;`,
+	`DELETE FROM nft_listings WHERE seller_id = $1;`,
+	`DELETE FROM nft_sales WHERE seller_id = $1 OR buyer_id = $1;`,
+	`DELETE FROM nft_items WHERE owner_id = $1;`,
 	`DELETE FROM p2p_deals WHERE poster_user_id = $1 OR taker_user_id = $1;`,
 	`DELETE FROM referral_links WHERE referrer_user_id = $1 OR referred_user_id = $1;`,
 	`DELETE FROM transfers WHERE sender_id = $1 OR recipient_id = $1;`,
@@ -31,6 +35,7 @@ var childQueries = []string{
 
 // Порядок важен: история раньше владельцев, сделки раньше листингов.
 var childTables = []string{
+	"nft_stats",
 	"p2p_listings",
 	"p2p_merchants",
 	"tickets",
@@ -61,6 +66,23 @@ var childTables = []string{
 	"wallets",
 }
 
+func execSkippable(ctx context.Context, tx pgx.Tx, query string, args ...any) error {
+	if _, err := tx.Exec(ctx, `SAVEPOINT delete_optional`); err != nil {
+		return err
+	}
+	_, execErr := tx.Exec(ctx, query, args...)
+	if execErr != nil {
+		if _, rollbackErr := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT delete_optional`); rollbackErr != nil {
+			return errors.Join(execErr, rollbackErr)
+		}
+		if !isSkippableSchemaError(execErr) {
+			return execErr
+		}
+	}
+	_, err := tx.Exec(ctx, `RELEASE SAVEPOINT delete_optional`)
+	return err
+}
+
 func DeleteUserByPlayerID(ctx context.Context, pool *pgxpool.Pool, playerID string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -78,14 +100,14 @@ func DeleteUserByPlayerID(ctx context.Context, pool *pgxpool.Pool, playerID stri
 	}
 
 	for _, q := range childQueries {
-		if _, err := tx.Exec(ctx, q, internalID); err != nil && !isSkippableSchemaError(err) {
+		if err := execSkippable(ctx, tx, q, internalID); err != nil {
 			return err
 		}
 	}
 
 	for _, table := range childTables {
 		q := `DELETE FROM ` + table + ` WHERE user_id = $1;`
-		if _, err := tx.Exec(ctx, q, internalID); err != nil && !isSkippableSchemaError(err) {
+		if err := execSkippable(ctx, tx, q, internalID); err != nil {
 			return err
 		}
 	}

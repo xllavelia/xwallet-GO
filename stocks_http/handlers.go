@@ -11,6 +11,7 @@ import (
 	"xwallet-server/stockoracle"
 	"xwallet-server/stocks_sql"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -208,10 +209,16 @@ func BuyHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req tradeStockRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UsdAmount <= 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+		usdAmount, valid := wallet_sql.NormalizeUSDAmount(req.UsdAmount)
+		if !valid {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		req.UsdAmount = usdAmount
 		if !stocks_sql.IsValidSymbol(req.Symbol) {
 			http.Error(w, "invalid symbol", http.StatusBadRequest)
 			return
@@ -257,10 +264,16 @@ func SellHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req tradeStockRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UsdAmount <= 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+		usdAmount, valid := wallet_sql.NormalizeUSDAmount(req.UsdAmount)
+		if !valid {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		req.UsdAmount = usdAmount
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)

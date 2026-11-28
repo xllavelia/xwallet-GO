@@ -62,17 +62,28 @@ func BuyServer(ctx context.Context, pool *pgxpool.Pool, userID int, catalogID st
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		INSERT INTO mining_servers (user_id, catalog_id, rank, purchased_at, last_tick_at)
-		VALUES ($1, $2, 1, now(), now());
-	`, userID, catalogID)
+		SELECT $1, $2, 1, now(), now()
+		WHERE (SELECT count(*) FROM mining_servers WHERE user_id = $1) < $3;
+	`, userID, catalogID, maxTotal)
 	if err != nil {
 		return err
 	}
+	if tag.RowsAffected() != 1 {
+		return ErrSlotLimitReached
+	}
 
-	_, err = tx.Exec(ctx, `UPDATE mining_profile SET lifetime_spent = lifetime_spent + $1 WHERE user_id = $2;`, def.Price, userID)
+	tag, err = tx.Exec(ctx, `
+		UPDATE mining_profile
+		SET lifetime_spent = lifetime_spent + $1
+		WHERE user_id = $2 AND extra_slots = $3;
+	`, def.Price, userID, profile.ExtraSlots)
 	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("mining profile %d changed during server purchase", userID)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -87,50 +98,75 @@ func BuyServer(ctx context.Context, pool *pgxpool.Pool, userID int, catalogID st
 // ===================== РАЗБУДИТЬ СЕРВЕР =====================
 
 func WakeServer(ctx context.Context, pool *pgxpool.Pool, userID int, serverID int64) error {
-	if err := Tick(ctx, pool, userID); err != nil {
-		return err
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
+	totalEarned, tickAt, err := settleTickTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+
 	var catalogID string
 	var rank int
 	var exhausted bool
+	var def ServerDef
+	var defFound bool
+	var actionErr error
 	err = tx.QueryRow(ctx, `
 		SELECT catalog_id, rank, exhausted FROM mining_servers WHERE id = $1 AND user_id = $2 FOR UPDATE;
 	`, serverID, userID).Scan(&catalogID, &rank, &exhausted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			actionErr = ErrServerNotFound
+		} else {
+			return err
+		}
+	} else if exhausted {
+		actionErr = ErrServerExhausted
+	} else {
+		def, defFound = GetServerDef(catalogID)
+		if !defFound {
+			actionErr = ErrUnknownServer
+		} else if def.SleepMinutes == 0 {
+			actionErr = ErrAlreadyAlwaysOn
+		} else if rank == 10 && def.PermanentNoSleepAtMaxRank {
+			actionErr = ErrAlreadyAlwaysOn
+		}
+	}
+
+	if actionErr == nil {
+		awakeUntil := tickAt.Add(time.Duration(def.SleepMinutes) * time.Minute)
+		tag, err := tx.Exec(ctx, `
+			UPDATE mining_servers SET awake_until = $1, last_tick_at = $2
+			WHERE id = $3 AND user_id = $4;
+		`, awakeUntil, tickAt, serverID, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
 			return ErrServerNotFound
 		}
+		tag, err = tx.Exec(ctx, `UPDATE mining_profile SET last_tick_at = $1 WHERE user_id = $2;`, tickAt, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("mining profile %d changed during server wake", userID)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	if exhausted {
-		return ErrServerExhausted
+	if totalEarned > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID,
+			fmt.Sprintf("mining:income:%d:%d", userID, time.Now().UnixNano()),
+			"mining_income_usd", totalEarned)
 	}
-
-	def, ok := GetServerDef(catalogID)
-	if !ok {
-		return ErrUnknownServer
-	}
-	if def.SleepMinutes == 0 {
-		return ErrAlreadyAlwaysOn
-	}
-	if rank == 10 && def.PermanentNoSleepAtMaxRank {
-		return ErrAlreadyAlwaysOn
-	}
-
-	awakeUntil := time.Now().Add(time.Duration(def.SleepMinutes) * time.Minute)
-	_, err = tx.Exec(ctx, `UPDATE mining_servers SET awake_until = $1, last_tick_at = now() WHERE id = $2;`, awakeUntil, serverID)
-	if err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+	return actionErr
 }
 
 // ===================== УДАЛИТЬ СЕРВЕР =====================
@@ -185,6 +221,11 @@ func UpgradeServer(ctx context.Context, pool *pgxpool.Pool, userID int, serverID
 		return err
 	}
 	defer tx.Rollback(ctx)
+
+	// Как и Tick, сначала блокируем профиль, затем серверы и кошелёк.
+	if _, err := getOrCreateProfile(ctx, tx, userID); err != nil {
+		return err
+	}
 
 	var catalogID string
 	var rank int
@@ -257,6 +298,10 @@ func BuyBuffItem(ctx context.Context, pool *pgxpool.Pool, userID int, buffType s
 	}
 	defer tx.Rollback(ctx)
 
+	// Держим тот же порядок блокировок, что и Tick: профиль, затем кошелёк.
+	if _, err := getOrCreateProfile(ctx, tx, userID); err != nil {
+		return err
+	}
 	if err := AdjustWalletBalanceTx(ctx, tx, userID, -dur.Price); err != nil {
 		return err
 	}

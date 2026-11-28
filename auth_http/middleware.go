@@ -2,10 +2,15 @@ package auth_http
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
+	"xwallet-server/users_sql"
+
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type contextKey string
@@ -18,36 +23,55 @@ type AuthenticatedUser struct {
 	IsAdmin  bool
 }
 
-func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
+type AuthStateLookup func(context.Context, string) (users_sql.AuthState, error)
+
+func RequireAuth(pool *pgxpool.Pool, next http.HandlerFunc) http.HandlerFunc {
+	return RequireAuthWithLookup(func(ctx context.Context, playerID string) (users_sql.AuthState, error) {
+		return users_sql.GetAuthState(ctx, pool, playerID)
+	}, next)
+}
+
+func RequireAuthAllowingBanned(pool *pgxpool.Pool, next http.HandlerFunc) http.HandlerFunc {
+	return requireAuthWithLookup(func(ctx context.Context, playerID string) (users_sql.AuthState, error) {
+		return users_sql.GetAuthState(ctx, pool, playerID)
+	}, true, next)
+}
+
+func RequireAuthWithLookup(lookup AuthStateLookup, next http.HandlerFunc) http.HandlerFunc {
+	return requireAuthWithLookup(lookup, false, next)
+}
+
+func requireAuthWithLookup(lookup AuthStateLookup, allowBanned bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			http.Error(w, "missing or invalid authorization header", http.StatusUnauthorized)
-			return
-		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			return jwtSecret(), nil
-		})
-		if err != nil || !token.Valid {
+		playerID, ok := parsePlayerIDFromRequest(r)
+		if !ok {
 			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
 			return
 		}
+		if lookup == nil {
+			http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+			return
+		}
 
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			http.Error(w, "invalid token claims", http.StatusUnauthorized)
+		state, err := lookup(r.Context(), playerID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !allowBanned && (state.Banned || state.DeviceBanned) {
+			http.Error(w, "account or device banned", http.StatusForbidden)
 			return
 		}
 
 		user := AuthenticatedUser{
-			PlayerID: toString(claims["playerId"]),
-			Username: toString(claims["username"]),
-			IsAdmin:  toBool(claims["isAdmin"]),
+			PlayerID: playerID,
+			Username: state.Username,
+			IsAdmin:  state.IsAdmin,
 		}
-
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next(w, r.WithContext(ctx))
 	}
@@ -58,36 +82,42 @@ func UserFromContext(r *http.Request) (AuthenticatedUser, bool) {
 	return user, ok
 }
 
-func toString(v interface{}) string {
-	s, _ := v.(string)
-	return s
-}
-
-func toBool(v interface{}) bool {
-	b, _ := v.(bool)
-	return b
-}
-
-func parseTokenFromRequest(r *http.Request) (AuthenticatedUser, bool) {
+func parsePlayerIDFromRequest(r *http.Request) (string, bool) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		return AuthenticatedUser{}, false
+		return "", false
 	}
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	tokenString := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if tokenString == "" {
+		return "", false
+	}
+
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		return jwtSecret(), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
-		return AuthenticatedUser{}, false
+		return "", false
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
+		return "", false
+	}
+	playerID, _ := claims["playerId"].(string)
+	return playerID, playerID != ""
+}
+
+func parseTokenFromRequest(r *http.Request, pool *pgxpool.Pool) (AuthenticatedUser, bool) {
+	playerID, ok := parsePlayerIDFromRequest(r)
+	if !ok {
 		return AuthenticatedUser{}, false
 	}
-	user := AuthenticatedUser{
-		PlayerID: toString(claims["playerId"]),
-		Username: toString(claims["username"]),
-		IsAdmin:  toBool(claims["isAdmin"]),
+	state, err := users_sql.GetAuthState(r.Context(), pool, playerID)
+	if err != nil || state.Banned || state.DeviceBanned {
+		return AuthenticatedUser{}, false
 	}
-	return user, true
+	return AuthenticatedUser{
+		PlayerID: playerID,
+		Username: state.Username,
+		IsAdmin:  state.IsAdmin,
+	}, true
 }

@@ -31,10 +31,12 @@ type service interface {
 type handlers struct{ store service }
 
 func RegisterRoutes(mux *http.ServeMux, pool *pgxpool.Pool) {
-	register(mux, profile_sql.NewStore(pool))
+	register(mux, profile_sql.NewStore(pool), func(next http.HandlerFunc) http.HandlerFunc {
+		return auth_http.RequireAuth(pool, next)
+	})
 }
 
-func register(mux *http.ServeMux, store service) {
+func register(mux *http.ServeMux, store service, requireAuth func(http.HandlerFunc) http.HandlerFunc) {
 	h := handlers{store: store}
 	for path, handler := range map[string]http.HandlerFunc{
 		"/profile": h.profile, "/profile/update": h.update,
@@ -44,7 +46,7 @@ func register(mux *http.ServeMux, store service) {
 		"/community":        h.community, "/community/search": h.search,
 		"/community/friend": h.friend,
 	} {
-		mux.HandleFunc(path, auth_http.WithCORS(auth_http.RequireAuth(handler)))
+		mux.HandleFunc(path, auth_http.WithCORS(requireAuth(handler)))
 	}
 }
 

@@ -2,16 +2,64 @@ package empire_sql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/wallet_sql"
 )
+
+// empireDB позволяет выполнять один и тот же код как через pool, так и
+// внутри транзакции действия.
+type empireDB interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+var errInsufficientFunds = errors.New("insufficient funds")
+
+func requireOneAffected(tag pgconn.CommandTag, operation string) error {
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%s: expected one affected row", operation)
+	}
+	return nil
+}
+
+// adjustWalletBalanceTx не обнуляет отрицательный остаток: списание возможно
+// только при достаточном балансе, а отсутствие кошелька считается ошибкой.
+func adjustWalletBalanceTx(ctx context.Context, tx pgx.Tx, userID int, delta float64) error {
+	tag, err := tx.Exec(ctx, `
+UPDATE wallets
+SET balance = balance + $2, updated_at = now()
+WHERE user_id = $1 AND balance + $2 >= 0;`, userID, delta)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errInsufficientFunds
+	}
+	return nil
+}
+
+// Тик сохраняет прежнее ограничение остатка нулём, чтобы расходы империи не блокировали её состояние.
+func adjustTickWalletBalanceTx(ctx context.Context, tx pgx.Tx, userID int, delta float64) error {
+	tag, err := tx.Exec(ctx, `
+UPDATE wallets
+SET balance = GREATEST(0, balance + $2), updated_at = now()
+WHERE user_id = $1;`, userID, delta)
+	if err != nil {
+		return err
+	}
+	return requireOneAffected(tag, "adjust empire tick balance")
+}
 
 // ============================================================
 // ПРОФИЛЬ ИМПЕРИИ
@@ -30,37 +78,63 @@ type EmpireProfile struct {
 	LastTick       time.Time
 }
 
-func GetOrCreateProfile(ctx context.Context, pool *pgxpool.Pool, userID int) (*EmpireProfile, error) {
-	p := &EmpireProfile{UserID: userID}
-	err := pool.QueryRow(ctx, `
-SELECT level, xp, prestige_count, prestige_points, rp,
-       total_earned, all_time_earned, total_spent, last_tick
-FROM empire_profiles WHERE user_id = $1;`, userID).
-		Scan(&p.Level, &p.XP, &p.PrestigeCount, &p.PrestigePoints, &p.RP,
-			&p.TotalEarned, &p.AllTimeEarned, &p.TotalSpent, &p.LastTick)
+func GetOrCreateProfile(ctx context.Context, db empireDB, userID int) (*EmpireProfile, error) {
+	p, err := readProfile(ctx, db, userID, false)
 	if err == nil {
 		return p, nil
 	}
-	_, err = pool.Exec(ctx, `
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if _, err := db.Exec(ctx, `
 INSERT INTO empire_profiles (user_id) VALUES ($1)
-ON CONFLICT (user_id) DO NOTHING;`, userID)
+ON CONFLICT (user_id) DO NOTHING;`, userID); err != nil {
+		return nil, err
+	}
+	// После конфликта с параллельным созданием обязательно перечитываем
+	// профиль вместо возврата нулевых значений.
+	return readProfile(ctx, db, userID, false)
+}
+
+func getOrCreateProfileForUpdate(ctx context.Context, tx pgx.Tx, userID int) (*EmpireProfile, error) {
+	if _, err := tx.Exec(ctx, `
+INSERT INTO empire_profiles (user_id) VALUES ($1)
+ON CONFLICT (user_id) DO NOTHING;`, userID); err != nil {
+		return nil, err
+	}
+	return readProfile(ctx, tx, userID, true)
+}
+
+func readProfile(ctx context.Context, db empireDB, userID int, lock bool) (*EmpireProfile, error) {
+	query := `
+SELECT level, xp, prestige_count, prestige_points, rp,
+       total_earned, all_time_earned, total_spent, last_tick
+FROM empire_profiles WHERE user_id = $1`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	p := &EmpireProfile{UserID: userID}
+	err := db.QueryRow(ctx, query, userID).
+		Scan(&p.Level, &p.XP, &p.PrestigeCount, &p.PrestigePoints, &p.RP,
+			&p.TotalEarned, &p.AllTimeEarned, &p.TotalSpent, &p.LastTick)
 	if err != nil {
 		return nil, err
 	}
-	p.Level = 1
-	p.LastTick = time.Now()
 	return p, nil
 }
 
-func saveProfile(ctx context.Context, pool *pgxpool.Pool, p *EmpireProfile) error {
-	_, err := pool.Exec(ctx, `
+func saveProfile(ctx context.Context, db empireDB, p *EmpireProfile) error {
+	tag, err := db.Exec(ctx, `
 UPDATE empire_profiles
 SET level=$2, xp=$3, prestige_count=$4, prestige_points=$5, rp=$6,
     total_earned=$7, all_time_earned=$8, total_spent=$9, last_tick=$10
 WHERE user_id=$1;`,
 		p.UserID, p.Level, p.XP, p.PrestigeCount, p.PrestigePoints, p.RP,
 		p.TotalEarned, p.AllTimeEarned, p.TotalSpent, p.LastTick)
-	return err
+	if err != nil {
+		return err
+	}
+	return requireOneAffected(tag, "save empire profile")
 }
 
 // applyXp добавляет XP и поднимает уровни (xp в профиле — прогресс
@@ -97,11 +171,11 @@ type ObjectInstance struct {
 	PurchasedAt    time.Time
 }
 
-func LoadObjects(ctx context.Context, pool *pgxpool.Pool, userID int) ([]ObjectInstance, error) {
-	rows, err := pool.Query(ctx, `
+func LoadObjects(ctx context.Context, db empireDB, userID int) ([]ObjectInstance, error) {
+	rows, err := db.Query(ctx, `
 SELECT id, def_id, COALESCE(custom_name, ''), level, workers_hired,
        worker_xp, satisfaction, invested, lifetime_earned, purchased_at
-FROM empire_objects WHERE user_id = $1 ORDER BY id;`, userID)
+FROM empire_objects WHERE user_id = $1 ORDER BY id FOR UPDATE;`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,9 +193,9 @@ FROM empire_objects WHERE user_id = $1 ORDER BY id;`, userID)
 	return out, rows.Err()
 }
 
-func LoadResearch(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]int, error) {
-	rows, err := pool.Query(ctx, `
-SELECT direction, level FROM empire_research WHERE user_id = $1;`, userID)
+func LoadResearch(ctx context.Context, db empireDB, userID int) (map[string]int, error) {
+	rows, err := db.Query(ctx, `
+SELECT direction, level FROM empire_research WHERE user_id = $1 FOR UPDATE;`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +212,10 @@ SELECT direction, level FROM empire_research WHERE user_id = $1;`, userID)
 	return out, rows.Err()
 }
 
-func LoadBoosters(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]time.Time, error) {
-	rows, err := pool.Query(ctx, `
+func LoadBoosters(ctx context.Context, db empireDB, userID int) (map[string]time.Time, error) {
+	rows, err := db.Query(ctx, `
 SELECT booster_type, expires_at FROM empire_boosters
-WHERE user_id = $1 AND expires_at > now();`, userID)
+WHERE user_id = $1 AND expires_at > now() FOR UPDATE;`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,10 +238,10 @@ type AssetHolding struct {
 	DividendsEarned float64
 }
 
-func LoadHoldings(ctx context.Context, pool *pgxpool.Pool, userID int) (map[string]AssetHolding, error) {
-	rows, err := pool.Query(ctx, `
+func LoadHoldings(ctx context.Context, db empireDB, userID int) (map[string]AssetHolding, error) {
+	rows, err := db.Query(ctx, `
 SELECT asset_id, shares, avg_price, dividends_earned
-FROM empire_asset_holdings WHERE user_id = $1 AND shares > 0;`, userID)
+FROM empire_asset_holdings WHERE user_id = $1 AND shares > 0 FOR UPDATE;`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +258,8 @@ FROM empire_asset_holdings WHERE user_id = $1 AND shares > 0;`, userID)
 	return out, rows.Err()
 }
 
-func loadAssetPrices(ctx context.Context, pool *pgxpool.Pool) (map[string]float64, error) {
-	rows, err := pool.Query(ctx, `SELECT asset_id, price FROM empire_asset_prices;`)
+func loadAssetPrices(ctx context.Context, db empireDB) (map[string]float64, error) {
+	rows, err := db.Query(ctx, `SELECT asset_id, price FROM empire_asset_prices;`)
 	if err != nil {
 		return nil, err
 	}
@@ -327,10 +401,14 @@ func r2(v float64) float64 { return math.Round(v*100) / 100 }
 // ЖУРНАЛ СОБЫТИЙ
 // ============================================================
 
-func logEvent(ctx context.Context, pool *pgxpool.Pool, userID int, typ, ref string, amount float64) {
-	pool.Exec(ctx, `
+func logEvent(ctx context.Context, db empireDB, userID int, typ, ref string, amount float64) error {
+	tag, err := db.Exec(ctx, `
 INSERT INTO empire_events (user_id, type, ref, amount) VALUES ($1, $2, $3, $4);`,
 		userID, typ, ref, amount)
+	if err != nil {
+		return err
+	}
+	return requireOneAffected(tag, "log empire event")
 }
 
 // ============================================================
@@ -341,22 +419,75 @@ INSERT INTO empire_events (user_id, type, ref, amount) VALUES ($1, $2, $3, $4);`
 // ============================================================
 
 func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
+	return withEmpireTransaction(ctx, pool, userID, nil)
+}
+
+// withEmpireTransaction объединяет тик дохода и действие пользователя.
+// Блокировка профиля внутри tickTx сериализует все Empire-действия
+// одного пользователя и не позволяет двум транзакциям начислить один тик.
+func withEmpireTransaction(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	userID int,
+	action func(context.Context, pgx.Tx, *EmpireProfile) error,
+) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	profile, tickIncome, err := tickTx(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+
+	var actionErr error
+	if action != nil {
+		if _, err := tx.Exec(ctx, `SAVEPOINT empire_action`); err != nil {
+			return err
+		}
+		actionErr = action(ctx, tx, profile)
+		if actionErr != nil {
+			if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT empire_action`); err != nil {
+				return errors.Join(actionErr, err)
+			}
+		}
+		if _, err := tx.Exec(ctx, `RELEASE SAVEPOINT empire_action`); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// Battle Pass tracker принимает только pool. Сохраняем существующую
+	// интеграцию после commit; сама экономическая операция уже атомарна.
+	if tickIncome > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID,
+			fmt.Sprintf("empire:income:%d:%d", userID, time.Now().UnixNano()),
+			"empire_income_usd", tickIncome)
+	}
+	return actionErr
+}
+
+func tickTx(ctx context.Context, tx pgx.Tx, userID int) (*EmpireProfile, float64, error) {
+	profile, err := getOrCreateProfileForUpdate(ctx, tx, userID)
+	if err != nil {
+		return nil, 0, err
+	}
 	now := time.Now()
-	profile, err := GetOrCreateProfile(ctx, pool, userID)
+	objects, err := LoadObjects(ctx, tx, userID)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	objects, err := LoadObjects(ctx, pool, userID)
+	research, err := LoadResearch(ctx, tx, userID)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	research, err := LoadResearch(ctx, pool, userID)
+	boosters, err := LoadBoosters(ctx, tx, userID)
 	if err != nil {
-		return err
-	}
-	boosters, err := LoadBoosters(ctx, pool, userID)
-	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	bonuses := ComputeBonuses(profile, research, boosters, now)
 
@@ -396,12 +527,15 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 			if o.Satisfaction > 100 {
 				o.Satisfaction = 100
 			}
-			_, err = pool.Exec(ctx, `
+			tag, err := tx.Exec(ctx, `
 UPDATE empire_objects
 SET lifetime_earned = $1, worker_xp = $2, satisfaction = $3
-WHERE id = $4;`, o.LifetimeEarned, o.WorkerXP, o.Satisfaction, o.ID)
+WHERE id = $4 AND user_id = $5;`, o.LifetimeEarned, o.WorkerXP, o.Satisfaction, o.ID, userID)
 			if err != nil {
-				return err
+				return nil, 0, err
+			}
+			if err := requireOneAffected(tag, "update empire object tick"); err != nil {
+				return nil, 0, err
 			}
 			totalGross += gross
 			totalExpenses += exp
@@ -411,20 +545,20 @@ WHERE id = $4;`, o.LifetimeEarned, o.WorkerXP, o.Satisfaction, o.ID)
 			}
 		}
 
-		dividends, err := payDividends(ctx, pool, userID, hours, bonuses.DividendsMult)
+		dividends, err := payDividends(ctx, tx, userID, hours, bonuses.DividendsMult)
 		if err != nil {
-			return err
+			return nil, 0, err
 		}
 
 		tickIncome = totalGross + dividends
 		netTotal := totalGross - totalExpenses + dividends
 		if netTotal != 0 {
-			if err := wallet_sql.AdjustBalance(ctx, pool, userID, netTotal); err != nil {
-				return err
+			if err := adjustTickWalletBalanceTx(ctx, tx, userID, netTotal); err != nil {
+				return nil, 0, err
 			}
 		}
 		if totalGross+dividends > 0 {
-			_, err = pool.Exec(ctx, `
+			tag, err := tx.Exec(ctx, `
 INSERT INTO empire_daily (user_id, day, income, expenses, net)
 VALUES ($1, CURRENT_DATE, $2, $3, $4)
 ON CONFLICT (user_id, day) DO UPDATE SET
@@ -433,25 +567,32 @@ ON CONFLICT (user_id, day) DO UPDATE SET
     net = empire_daily.net + EXCLUDED.net;`,
 				userID, totalGross+dividends, totalExpenses, netTotal)
 			if err != nil {
-				return err
+				return nil, 0, err
+			}
+			if err := requireOneAffected(tag, "update empire daily income"); err != nil {
+				return nil, 0, err
 			}
 		}
 
+		// Блокируем контракты до чтения и изменения прогресса.
+		if err := lockContracts(ctx, tx, userID); err != nil {
+			return nil, 0, err
+		}
 		// Прогресс контрактов от дохода.
-		_, err = pool.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 UPDATE empire_contracts SET progress = progress + $2
 WHERE user_id = $1 AND status = 'active' AND metric = 'revenue';`,
 			userID, totalGross+dividends)
 		if err != nil {
-			return err
+			return nil, 0, err
 		}
 		if energyIncome > 0 {
-			_, err = pool.Exec(ctx, `
+			_, err = tx.Exec(ctx, `
 UPDATE empire_contracts SET progress = progress + $2
 WHERE user_id = $1 AND status = 'active' AND metric = 'energy_income';`,
 				userID, energyIncome)
 			if err != nil {
-				return err
+				return nil, 0, err
 			}
 		}
 
@@ -459,43 +600,59 @@ WHERE user_id = $1 AND status = 'active' AND metric = 'energy_income';`,
 		profile.AllTimeEarned += totalGross + dividends
 		profile.RP += rpGain
 		applyXp(profile, (totalGross+dividends)*XpPerIncome)
+	} else {
+		if err := lockContracts(ctx, tx, userID); err != nil {
+			return nil, 0, err
+		}
 	}
 
 	// Протухшие контракты.
-	_, err = pool.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 UPDATE empire_contracts SET status = 'expired'
 WHERE user_id = $1 AND status = 'active' AND expires_at < $2;`, userID, now)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 
-	if err := tickAssetPrices(ctx, pool, now); err != nil {
-		return err
+	if err := tickAssetPrices(ctx, tx, now); err != nil {
+		return nil, 0, err
 	}
-	if err := ensureContractOffers(ctx, pool, userID, profile.Level); err != nil {
-		return err
+	if err := ensureContractOffers(ctx, tx, userID, profile.Level); err != nil {
+		return nil, 0, err
 	}
 
 	profile.LastTick = now
-	if err := saveProfile(ctx, pool, profile); err != nil {
+	if err := saveProfile(ctx, tx, profile); err != nil {
+		return nil, 0, err
+	}
+	return profile, tickIncome, nil
+}
+
+func lockContracts(ctx context.Context, db empireDB, userID int) error {
+	rows, err := db.Query(ctx, `
+SELECT id FROM empire_contracts WHERE user_id = $1 FOR UPDATE;`, userID)
+	if err != nil {
 		return err
 	}
-	if tickIncome > 0 {
-		battlepass_sql.BPTrackEvent(ctx, pool, userID,
-			fmt.Sprintf("empire:income:%d:%d", userID, now.UnixNano()),
-			"empire_income_usd", tickIncome)
+	defer rows.Close()
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
 	}
-	return nil
+	return rows.Err()
 }
 
 // payDividends начисляет дивиденды по всем holding'ам, сам баланс
 // корректирует вызывающий код. Возвращает сумму дивидендов.
-func payDividends(ctx context.Context, pool *pgxpool.Pool, userID int, hours, mult float64) (float64, error) {
-	rows, err := pool.Query(ctx, `
+func payDividends(ctx context.Context, db empireDB, userID int, hours, mult float64) (float64, error) {
+	rows, err := db.Query(ctx, `
 SELECT h.asset_id, h.shares, h.avg_price, p.price
 FROM empire_asset_holdings h
 JOIN empire_asset_prices p ON p.asset_id = h.asset_id
-WHERE h.user_id = $1 AND h.shares > 0;`, userID)
+WHERE h.user_id = $1 AND h.shares > 0
+FOR UPDATE OF h;`, userID)
 	if err != nil {
 		return 0, err
 	}
@@ -514,6 +671,10 @@ WHERE h.user_id = $1 AND h.shares > 0;`, userID)
 		}
 		list = append(list, r)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
 	rows.Close()
 	total := 0.0
 	for _, r := range list {
@@ -523,11 +684,14 @@ WHERE h.user_id = $1 AND h.shares > 0;`, userID)
 		}
 		d := float64(r.shares) * r.price * def.DailyDividendYield / 24 * hours * mult
 		total += d
-		_, err = pool.Exec(ctx, `
+		tag, err := db.Exec(ctx, `
 UPDATE empire_asset_holdings
 SET dividends_earned = dividends_earned + $2
-WHERE user_id = $1 AND asset_id = $3;`, userID, d, r.asset)
+WHERE user_id = $1 AND asset_id = $3 AND shares = $4;`, userID, d, r.asset, r.shares)
 		if err != nil {
+			return 0, err
+		}
+		if err := requireOneAffected(tag, "update asset dividends"); err != nil {
 			return 0, err
 		}
 	}
@@ -535,15 +699,18 @@ WHERE user_id = $1 AND asset_id = $3;`, userID, d, r.asset)
 }
 
 // tickAssetPrices догоняет random walk цен активов.
-func tickAssetPrices(ctx context.Context, pool *pgxpool.Pool, now time.Time) error {
+func tickAssetPrices(ctx context.Context, db empireDB, now time.Time) error {
 	for _, def := range EmpireAssets {
 		var price float64
 		var updatedAt time.Time
-		err := pool.QueryRow(ctx, `
-SELECT price, updated_at FROM empire_asset_prices WHERE asset_id = $1;`,
+		err := db.QueryRow(ctx, `
+SELECT price, updated_at FROM empire_asset_prices WHERE asset_id = $1 FOR UPDATE;`,
 			def.ID).Scan(&price, &updatedAt)
-		if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			continue // не засеяно — SeedEmpireAssets должна была
+		}
+		if err != nil {
+			return err
 		}
 		steps := int(math.Floor(now.Sub(updatedAt).Minutes() / AssetPriceTickMinutes))
 		if steps <= 0 {
@@ -561,17 +728,25 @@ SELECT price, updated_at FROM empire_asset_prices WHERE asset_id = $1;`,
 		price = r2(price)
 		// Финальную цену пишем в историю один раз за вызов —
 		// точек на графике меньше, но их всегда <= AssetHistoryLimit.
-		if _, err := pool.Exec(ctx, `
-UPDATE empire_asset_prices SET price = $2, updated_at = $3 WHERE asset_id = $1;`,
-			def.ID, price, now); err != nil {
+		tag, err := db.Exec(ctx, `
+UPDATE empire_asset_prices SET price = $2, updated_at = $3
+WHERE asset_id = $1 AND updated_at = $4;`, def.ID, price, now, updatedAt)
+		if err != nil {
 			return err
 		}
-		if _, err := pool.Exec(ctx, `
+		if err := requireOneAffected(tag, "update empire asset price"); err != nil {
+			return err
+		}
+		tag, err = db.Exec(ctx, `
 INSERT INTO empire_asset_history (asset_id, price) VALUES ($1, $2);`,
-			def.ID, price); err != nil {
+			def.ID, price)
+		if err != nil {
 			return err
 		}
-		if _, err := pool.Exec(ctx, `
+		if err := requireOneAffected(tag, "insert empire asset history"); err != nil {
+			return err
+		}
+		if _, err := db.Exec(ctx, `
 DELETE FROM empire_asset_history
 WHERE asset_id = $1
   AND id NOT IN (
@@ -586,9 +761,9 @@ WHERE asset_id = $1
 
 // ensureContractOffers держит количество активных офферов
 // на уровне EmpireMaxOffers.
-func ensureContractOffers(ctx context.Context, pool *pgxpool.Pool, userID, level int) error {
+func ensureContractOffers(ctx context.Context, db empireDB, userID, level int) error {
 	var activeCount int
-	if err := pool.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 SELECT COUNT(*) FROM empire_contracts
 WHERE user_id = $1 AND status = 'active';`, userID).Scan(&activeCount); err != nil {
 		return err
@@ -597,12 +772,12 @@ WHERE user_id = $1 AND status = 'active';`, userID).Scan(&activeCount); err != n
 		return nil
 	}
 	var lastGen time.Time
-	_ = pool.QueryRow(ctx, `
+	_ = db.QueryRow(ctx, `
 SELECT MAX(created_at) FROM empire_contracts WHERE user_id = $1;`, userID).Scan(&lastGen)
 	// Первый заход — сразу выдаём полный набор.
 	if activeCount == 0 || lastGen.IsZero() {
 		for activeCount < EmpireMaxOffers {
-			if err := generateContract(ctx, pool, userID, level); err != nil {
+			if err := generateContract(ctx, db, userID, level); err != nil {
 				return err
 			}
 			activeCount++
@@ -610,12 +785,12 @@ SELECT MAX(created_at) FROM empire_contracts WHERE user_id = $1;`, userID).Scan(
 		return nil
 	}
 	if time.Since(lastGen) >= time.Duration(EmpireContractRegenHours*float64(time.Hour)) {
-		return generateContract(ctx, pool, userID, level)
+		return generateContract(ctx, db, userID, level)
 	}
 	return nil
 }
 
-func generateContract(ctx context.Context, pool *pgxpool.Pool, userID, level int) error {
+func generateContract(ctx context.Context, db empireDB, userID, level int) error {
 	t := EmpireContractTemplates[rand.Intn(len(EmpireContractTemplates))]
 	target := math.Round(t.BaseTarget + t.TargetPerLevel*float64(level-1))
 	if target < 1 {
@@ -625,13 +800,16 @@ func generateContract(ctx context.Context, pool *pgxpool.Pool, userID, level int
 	xp := t.XpBase + t.XpPerLevel*float64(level-1)
 	rp := t.RpBase + t.RpPerLevel*float64(level-1)
 	expires := time.Now().Add(time.Duration(t.DurationHours * float64(time.Hour)))
-	_, err := pool.Exec(ctx, `
+	tag, err := db.Exec(ctx, `
 INSERT INTO empire_contracts
     (user_id, template_id, title, metric, target,
      reward_money, reward_xp, reward_rp, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`,
 		userID, t.ID, t.Name, t.Metric, target, money, xp, rp, expires)
-	return err
+	if err != nil {
+		return err
+	}
+	return requireOneAffected(tag, "generate empire contract")
 }
 
 // ============================================================

@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"xwallet-server/auth_http"
 	"xwallet-server/profile_sql"
+	"xwallet-server/users_sql"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -88,7 +90,11 @@ func testMux(t *testing.T, s service) (*http.ServeMux, string) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	register(mux, s)
+	register(mux, s, func(next http.HandlerFunc) http.HandlerFunc {
+		return auth_http.RequireAuthWithLookup(func(context.Context, string) (users_sql.AuthState, error) {
+			return users_sql.AuthState{Username: "LiveName"}, nil
+		}, next)
+	})
 	return mux, signed
 }
 func perform(mux *http.ServeMux, token, method, path, body string) *httptest.ResponseRecorder {

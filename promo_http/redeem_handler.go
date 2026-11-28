@@ -173,40 +173,45 @@ func handlePromoRedeem(w http.ResponseWriter, r *http.Request, pool *pgxpool.Poo
 		return
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		http.Error(w, "could not finalize redemption", http.StatusInternalServerError)
-		return
-	}
-
 	var message string
 	switch promo.RewardType {
 	case "usdt_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "usdt_credit", promo.RewardValue, "promo", maxSlots)
+		err = user_vouchers_sql.GrantCreditVoucherTx(ctx, tx, userID, "usdt_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: $%.2f USDT credit - claim it in Vouchers", promo.RewardValue)
 	case "lavx_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "lavx_credit", promo.RewardValue, "promo", maxSlots)
+		err = user_vouchers_sql.GrantCreditVoucherTx(ctx, tx, userID, "lavx_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: %.0f LAVX credit - claim it in Vouchers", promo.RewardValue)
 	case "ref_xp_voucher":
-		err = user_vouchers_sql.GrantCreditVoucher(ctx, pool, userID, "ref_xp_credit", promo.RewardValue, "promo", maxSlots)
+		err = user_vouchers_sql.GrantCreditVoucherTx(ctx, tx, userID, "ref_xp_credit", promo.RewardValue, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: +%.0f Referral XP - claim it in Vouchers", promo.RewardValue)
 	case "fee_voucher":
 		durationSeconds := 345600
 		if promo.RewardDurationDays != nil {
 			durationSeconds = *promo.RewardDurationDays * 86400
 		}
-		err = user_vouchers_sql.GrantFeeDiscountVoucher(ctx, pool, userID, promo.RewardValue, durationSeconds, "promo", maxSlots)
+		err = user_vouchers_sql.GrantFeeDiscountVoucherTx(ctx, tx, userID, promo.RewardValue, durationSeconds, "promo", maxSlots)
 		message = fmt.Sprintf("Voucher granted: $%.2f fee-free trading - claim it in Vouchers", promo.RewardValue)
 	default:
+		// Сохраняем прежний контракт для неподдерживаемого типа награды.
+		if err := tx.Commit(ctx); err != nil {
+			http.Error(w, "could not finalize redemption", http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, "this code has an unsupported reward type", http.StatusInternalServerError)
 		return
 	}
 
 	if err != nil {
-		if err == user_vouchers_sql.ErrSlotsFull {
+		if errors.Is(err, user_vouchers_sql.ErrSlotsFull) {
 			http.Error(w, "your voucher slots filled up during redemption - check Vouchers", http.StatusConflict)
 			return
 		}
-		http.Error(w, "code redeemed, but the reward could not be granted - contact support", http.StatusInternalServerError)
+		http.Error(w, "the reward could not be granted - try again or contact support", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		http.Error(w, "could not finalize redemption", http.StatusInternalServerError)
 		return
 	}
 

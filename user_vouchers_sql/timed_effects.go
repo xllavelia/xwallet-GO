@@ -3,12 +3,23 @@ package user_vouchers_sql
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func GetActiveXpBoostPercent(ctx context.Context, pool *pgxpool.Pool, userID int) (float64, error) {
 	var percent float64
 	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(limit_amount), 0) FROM user_vouchers
+		WHERE user_id = $1 AND voucher_type = 'xp_boost' AND status = 'active'
+		  AND activated_at + (duration_seconds || ' seconds')::interval > now();
+	`, userID).Scan(&percent)
+	return percent, err
+}
+
+func GetActiveXpBoostPercentTx(ctx context.Context, tx pgx.Tx, userID int) (float64, error) {
+	var percent float64
+	err := tx.QueryRow(ctx, `
 		SELECT COALESCE(MAX(limit_amount), 0) FROM user_vouchers
 		WHERE user_id = $1 AND voucher_type = 'xp_boost' AND status = 'active'
 		  AND activated_at + (duration_seconds || ' seconds')::interval > now();

@@ -31,6 +31,27 @@ func ResolveFundingSource(ctx context.Context, q Queryer, userID int) (FundingSo
 var ErrFundingSourceNotFound = errors.New("funding account not found")
 var ErrInvalidFundingDelta = errors.New("funding balance adjustment must be finite")
 
+func LockFundingSource(ctx context.Context, q Queryer, source FundingSource) error {
+	var table, whereCol string
+	var whereVal interface{}
+	if source.Kind == "card" {
+		table = "bank_cards"
+		whereCol = "id"
+		whereVal = source.CardID
+	} else {
+		table = "wallets"
+		whereCol = "user_id"
+		whereVal = source.UserID
+	}
+
+	var id int
+	err := q.QueryRow(ctx, "SELECT "+whereCol+" FROM "+table+" WHERE "+whereCol+" = $1 FOR UPDATE;", whereVal).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrFundingSourceNotFound
+	}
+	return err
+}
+
 func AdjustFundingBalance(ctx context.Context, q Queryer, source FundingSource, delta float64) error {
 	if math.IsNaN(delta) || math.IsInf(delta, 0) {
 		return ErrInvalidFundingDelta

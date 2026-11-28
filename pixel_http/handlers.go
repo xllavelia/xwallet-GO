@@ -11,6 +11,7 @@ import (
 	"xwallet-server/pixel_engine"
 	"xwallet-server/pixel_sql"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -89,10 +90,16 @@ func BetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req betRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Amount <= 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid amount", http.StatusBadRequest)
 			return
 		}
+		amount, valid := wallet_sql.NormalizeUSDAmount(req.Amount)
+		if !valid {
+			http.Error(w, "invalid amount", http.StatusBadRequest)
+			return
+		}
+		req.Amount = amount
 		boardID, err := pixel_engine.PlaceBet(r.Context(), userID, req.Amount)
 		if err != nil {
 			switch err {

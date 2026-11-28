@@ -15,11 +15,6 @@ func BuyStock(ctx context.Context, pool *pgxpool.Pool, userID int, symbol string
 		return 0, ErrInvalidSymbol
 	}
 
-	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-	if err != nil {
-		return 0, err
-	}
-
 	quantity := usdAmount / price
 
 	tx, err := pool.Begin(ctx)
@@ -28,6 +23,10 @@ func BuyStock(ctx context.Context, pool *pgxpool.Pool, userID int, symbol string
 	}
 	defer tx.Rollback(ctx)
 
+	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+	if err != nil {
+		return 0, err
+	}
 	if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, -usdAmount); err != nil {
 		if errors.Is(err, bankcards_sql.ErrInsufficientFunds) {
 			return 0, ErrInsufficientFunds
@@ -35,23 +34,15 @@ func BuyStock(ctx context.Context, pool *pgxpool.Pool, userID int, symbol string
 		return 0, err
 	}
 
-	var existingQty, existingAvg float64
-	err = tx.QueryRow(ctx, `SELECT quantity, avg_cost FROM stock_holdings WHERE user_id = $1 AND symbol = $2 FOR UPDATE;`, userID, symbol).Scan(&existingQty, &existingAvg)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return 0, err
-	}
-
-	newQty := existingQty + quantity
-	newAvgCost := existingAvg
-	if newQty > 0 {
-		newAvgCost = (existingQty*existingAvg + usdAmount) / newQty
-	}
-
 	_, err = tx.Exec(ctx, `
 		INSERT INTO stock_holdings (user_id, symbol, quantity, avg_cost, updated_at)
 		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (user_id, symbol) DO UPDATE SET quantity = $3, avg_cost = $4, updated_at = now();
-	`, userID, symbol, newQty, newAvgCost)
+		ON CONFLICT (user_id, symbol) DO UPDATE
+		SET quantity = stock_holdings.quantity + EXCLUDED.quantity,
+		    avg_cost = (stock_holdings.quantity * stock_holdings.avg_cost + EXCLUDED.quantity * EXCLUDED.avg_cost)
+		        / (stock_holdings.quantity + EXCLUDED.quantity),
+		    updated_at = now();
+	`, userID, symbol, quantity, price)
 	if err != nil {
 		return 0, err
 	}
@@ -71,16 +62,16 @@ func BuyStock(ctx context.Context, pool *pgxpool.Pool, userID int, symbol string
 }
 
 func SellStock(ctx context.Context, pool *pgxpool.Pool, userID int, symbol string, usdAmount float64, price float64) (float64, float64, error) {
-	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-	if err != nil {
-		return 0, 0, err
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback(ctx)
+
+	fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	var existingQty, existingAvg float64
 	err = tx.QueryRow(ctx, `SELECT quantity, avg_cost FROM stock_holdings WHERE user_id = $1 AND symbol = $2 FOR UPDATE;`, userID, symbol).Scan(&existingQty, &existingAvg)

@@ -22,7 +22,7 @@ type sendTransferRequest struct {
 
 func toDetailResponse(d transfer_sql.TransferDetail) map[string]interface{} {
 	return map[string]interface{}{
-		"id": d.ID, "direction": d.Direction, "amount": d.Amount,
+		"id": d.ID, "direction": d.Direction, "amount": d.Amount, "feeAmount": d.FeeAmount,
 		"counterpartyUsername": d.CounterpartyUsername, "counterpartyPlayerId": d.CounterpartyPlayerID,
 		"referenceCode": d.ReferenceCode, "status": d.Status,
 		"createdAt": d.CreatedAt.Format("2006-01-02T15:04:05Z"), "xpAwarded": d.XpAwarded,
@@ -78,7 +78,7 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		transferID, feeAmount, err := transfer_sql.ExecuteTransfer(r.Context(), pool, senderID, recipientID, req.Amount)
+		transferID, _, err := transfer_sql.ExecuteTransfer(r.Context(), pool, senderID, recipientID, req.Amount)
 		if err != nil {
 			if err == transfer_sql.ErrInsufficientBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
@@ -104,6 +104,5 @@ func SendTransferHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(toDetailResponse(detail))
-		_ = feeAmount
 	}
 }

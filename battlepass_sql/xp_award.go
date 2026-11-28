@@ -2,11 +2,12 @@ package battlepass_sql
 
 import (
 	"context"
+	"errors"
 	"log"
-	"time"
 
 	"xwallet-server/user_vouchers_sql"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,6 +47,36 @@ func applyBoostAndAdd(
 	}
 
 	return finalXP
+}
+
+func applyBoostAndAddTx(ctx context.Context, tx pgx.Tx, userID int, baseXP int) (int, error) {
+	if baseXP <= 0 {
+		return 0, nil
+	}
+
+	boostPercent, err := user_vouchers_sql.GetActiveXpBoostPercentTx(ctx, tx, userID)
+	if err != nil {
+		boostPercent = 0
+	}
+
+	finalXP := int(float64(baseXP) * (1 + boostPercent/100))
+	if finalXP <= 0 {
+		return 0, nil
+	}
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE battlepass_progress
+		SET xp = xp + $1
+		WHERE user_id = $2;
+	`, finalXP, userID)
+	if err != nil {
+		return 0, err
+	}
+	if tag.RowsAffected() != 1 {
+		return 0, errors.New("battlepass progress row missing during xp award")
+	}
+
+	return finalXP, nil
 }
 
 func tradeBaseXP(pnl float64) int {
@@ -174,26 +205,6 @@ func awardDailyCapped(
 		return 0
 	}
 
-	var lastAt *time.Time
-
-	query := `SELECT ` + column + `
-		FROM battlepass_progress
-		WHERE user_id = $1;`
-
-	if err := pool.QueryRow(
-		ctx,
-		query,
-		userID,
-	).Scan(&lastAt); err != nil {
-		log.Println("battlepass last xp time query failed:", err)
-		return 0
-	}
-
-	// Не позволяем получать XP повторно раньше чем через 24 часа.
-	if lastAt != nil && time.Since(*lastAt) < 24*time.Hour {
-		return 0
-	}
-
 	baseXP := 0
 
 	if tier2Min > 0 && amount >= tier2Min {
@@ -206,20 +217,39 @@ func awardDailyCapped(
 		return 0
 	}
 
-	updateQuery := `UPDATE battlepass_progress
-		SET ` + column + ` = NOW()
-		WHERE user_id = $1;`
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		log.Println("battlepass xp transaction start failed:", err)
+		return 0
+	}
+	defer tx.Rollback(ctx)
 
-	if _, err := pool.Exec(
-		ctx,
-		updateQuery,
-		userID,
-	); err != nil {
+	// Условие перепроверяется PostgreSQL после ожидания строки другим запросом.
+	updateQuery := `UPDATE battlepass_progress
+		SET ` + column + ` = clock_timestamp()
+		WHERE user_id = $1
+		  AND (` + column + ` IS NULL OR ` + column + ` < now() - interval '24 hours');`
+
+	tag, err := tx.Exec(ctx, updateQuery, userID)
+	if err != nil {
 		log.Println("battlepass xp timestamp update failed:", err)
 		return 0
 	}
+	if tag.RowsAffected() != 1 {
+		return 0
+	}
 
-	return applyBoostAndAdd(ctx, pool, userID, baseXP)
+	awardedXP, err := applyBoostAndAddTx(ctx, tx, userID, baseXP)
+	if err != nil {
+		log.Println("battlepass xp award failed:", err)
+		return 0
+	}
+	if err := tx.Commit(ctx); err != nil {
+		log.Println("battlepass xp transaction commit failed:", err)
+		return 0
+	}
+
+	return awardedXP
 }
 
 // DevAddXP позволяет вручную добавить XP пользователю.

@@ -7,6 +7,7 @@ import (
 	"xwallet-server/auth_http"
 	"xwallet-server/savings_sql"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,10 +24,16 @@ func WithdrawHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req amountRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Amount <= 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid amount", http.StatusBadRequest)
 			return
 		}
+		amount, valid := wallet_sql.NormalizeUSDAmount(req.Amount)
+		if !valid {
+			http.Error(w, "invalid amount", http.StatusBadRequest)
+			return
+		}
+		req.Amount = amount
 		userID, err := users_sql.GetInternalIDByPlayerID(r.Context(), pool, authUser.PlayerID)
 		if err != nil {
 			http.Error(w, "user not found", http.StatusNotFound)

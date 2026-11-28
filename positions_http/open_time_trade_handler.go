@@ -10,7 +10,9 @@ import (
 	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
+	"xwallet-server/priceoracle"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -57,12 +59,19 @@ func OpenTimeTradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "type must be 'long' or 'short'", http.StatusBadRequest)
 			return
 		}
-		if req.Amount <= 0 {
-			http.Error(w, "amount must be positive", http.StatusBadRequest)
+		amount, validAmount := wallet_sql.NormalizeUSDAmount(req.Amount)
+		if !validAmount {
+			http.Error(w, "amount must be a positive USD amount", http.StatusBadRequest)
 			return
 		}
-		if req.EntryPrice <= 0 {
-			http.Error(w, "invalid entry price", http.StatusBadRequest)
+		req.Amount = amount
+		if !isSupportedCoin(req.Coin) {
+			http.Error(w, "unsupported coin", http.StatusBadRequest)
+			return
+		}
+		entryPrice, hasPrice := priceoracle.Get(req.Coin)
+		if !hasPrice || entryPrice <= 0 {
+			http.Error(w, "price unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		if req.DurationSeconds < positions_sql.MinTimeTradeSeconds || req.DurationSeconds > positions_sql.MaxTimeTradeSeconds {
@@ -103,8 +112,8 @@ func OpenTimeTradeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		pos := positions_sql.Position{
 			TradeID: generateTradeID(), UserID: userID, Coin: req.Coin, Type: req.Type,
-			EntryPrice: req.EntryPrice, Leverage: 1, Amount: req.Amount, Margin: req.Amount,
-			Fees: 0, FeesPaidByVoucher: false, LiqPrice: req.EntryPrice,
+			EntryPrice: entryPrice, Leverage: 1, Amount: req.Amount, Margin: req.Amount,
+			Fees: 0, FeesPaidByVoucher: false, LiqPrice: entryPrice,
 			AutoClose: false, AutoCloseTarget: nil,
 			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),
 			TradeMode: "time", ExpiresAt: &expiresAt, PayoutMultiplier: &multiplier,

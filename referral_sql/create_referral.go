@@ -5,6 +5,8 @@ import (
 	"errors"
 	"math/rand"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,24 +21,36 @@ func generateReferralCode() string {
 	return "REF-" + string(b)
 }
 
-func codeExists(ctx context.Context, pool *pgxpool.Pool, code string) (bool, error) {
-	var exists bool
-	err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM referrals WHERE referral_code = $1);`, code).Scan(&exists)
+type referralDB interface {
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+}
 
+func codeExists(ctx context.Context, db referralDB, code string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM referrals WHERE referral_code = $1);`, code).Scan(&exists)
 	return exists, err
 }
 
 func CreateReferralForNewUser(ctx context.Context, pool *pgxpool.Pool, userID int) error {
+	return createReferralForNewUser(ctx, pool, userID)
+}
+
+func CreateReferralForNewUserTx(ctx context.Context, tx pgx.Tx, userID int) error {
+	return createReferralForNewUser(ctx, tx, userID)
+}
+
+func createReferralForNewUser(ctx context.Context, db referralDB, userID int) error {
 	for attempt := 0; attempt < 20; attempt++ {
 		code := generateReferralCode()
-		exists, err := codeExists(ctx, pool, code)
+		exists, err := codeExists(ctx, db, code)
 		if err != nil {
 			return err
 		}
 		if exists {
 			continue
 		}
-		_, err = pool.Exec(ctx, `
+		_, err = db.Exec(ctx, `
 			INSERT INTO referrals (user_id, referral_code)
 			VALUES ($1, $2)
 			ON CONFLICT (user_id) DO NOTHING;

@@ -2,9 +2,11 @@ package slots_sql
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -26,20 +28,50 @@ type SlotsProfile struct {
 }
 
 func GetOrCreateProfile(ctx context.Context, pool *pgxpool.Pool, userID int) (*SlotsProfile, error) {
-	p := &SlotsProfile{UserID: userID}
-	err := pool.QueryRow(ctx, `
-SELECT spins, wager_pool, total_spins, total_wins, total_winnings,
-       total_wagered, biggest_win, current_streak, best_streak
-FROM slots_profiles WHERE user_id = $1;`, userID).
-		Scan(&p.Spins, &p.WagerPool, &p.TotalSpins, &p.TotalWins, &p.TotalWinnings,
-			&p.TotalWagered, &p.BiggestWin, &p.CurrentStreak, &p.BestStreak)
+	p, err := readProfile(ctx, pool, userID, false)
 	if err == nil {
 		return p, nil
 	}
-	_, err = pool.Exec(ctx, `
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if _, err := pool.Exec(ctx, `
 INSERT INTO slots_profiles (user_id) VALUES ($1)
-ON CONFLICT (user_id) DO NOTHING;`, userID)
-	return p, err
+ON CONFLICT (user_id) DO NOTHING;`, userID); err != nil {
+		return nil, err
+	}
+	return readProfile(ctx, pool, userID, false)
+}
+
+// getOrCreateProfileTx блокирует профиль до чтения баланса спинов и
+// статистики. Покупка пака и спин одного пользователя сериализуются.
+func getOrCreateProfileTx(ctx context.Context, tx pgx.Tx, userID int) (*SlotsProfile, error) {
+	if _, err := tx.Exec(ctx, `
+INSERT INTO slots_profiles (user_id) VALUES ($1)
+ON CONFLICT (user_id) DO NOTHING;`, userID); err != nil {
+		return nil, err
+	}
+	return readProfile(ctx, tx, userID, true)
+}
+
+func readProfile(ctx context.Context, db interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, userID int, lock bool) (*SlotsProfile, error) {
+	query := `
+SELECT spins, wager_pool, total_spins, total_wins, total_winnings,
+       total_wagered, biggest_win, current_streak, best_streak
+FROM slots_profiles WHERE user_id = $1`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	p := &SlotsProfile{UserID: userID}
+	err := db.QueryRow(ctx, query, userID).
+		Scan(&p.Spins, &p.WagerPool, &p.TotalSpins, &p.TotalWins, &p.TotalWinnings,
+			&p.TotalWagered, &p.BiggestWin, &p.CurrentStreak, &p.BestStreak)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // BuildState — полный ответ фронта: баланс спинов, история, статистика, конфиг.

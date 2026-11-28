@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"xwallet-server/bankcards_sql"
 
@@ -22,11 +21,6 @@ type ListingWithPoster struct {
 }
 
 func CreateListing(ctx context.Context, pool *pgxpool.Pool, userID int, side string, assetClass string, baseAsset string, rateUsd float64, minUsd float64, maxUsd float64, baseAmount float64, note string) (int, error) {
-	var isMerchant bool
-	pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM p2p_merchants WHERE user_id=$1);`, userID).Scan(&isMerchant)
-	if !isMerchant {
-		return 0, ErrNotMerchant
-	}
 	if side != "buy" && side != "sell" {
 		return 0, ErrInvalidListing
 	}
@@ -37,26 +31,28 @@ func CreateListing(ctx context.Context, pool *pgxpool.Pool, userID int, side str
 		return 0, ErrInvalidListing
 	}
 
-	var fundingSource bankcards_sql.FundingSource
-	var fsErr error
-	if side == "buy" {
-		fundingSource, fsErr = bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-		if fsErr != nil {
-			return 0, fsErr
-		}
-	}
-
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
 
+	var merchantID int
+	if err := tx.QueryRow(ctx, `SELECT user_id FROM p2p_merchants WHERE user_id=$1 FOR UPDATE;`, userID).Scan(&merchantID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrNotMerchant
+		}
+		return 0, err
+	}
 	if side == "sell" {
 		if err := moveAssetOut(ctx, tx, userID, assetClass, baseAsset, baseAmount); err != nil {
 			return 0, err
 		}
 	} else {
+		fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+		if err != nil {
+			return 0, err
+		}
 		usdNeeded := baseAmount * rateUsd
 		if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, -usdNeeded); err != nil {
 			return 0, err
@@ -130,6 +126,26 @@ func GetActiveListings(ctx context.Context, pool *pgxpool.Pool, side string, ass
 	return result, rows.Err()
 }
 
+func GetListingDetail(ctx context.Context, pool *pgxpool.Pool, listingID int, viewerUserID int) (ListingWithPoster, error) {
+	var l ListingWithPoster
+	err := pool.QueryRow(ctx, `
+		SELECT l.id, l.user_id, l.side, l.base_asset, l.asset_class, l.rate_usd, l.min_amount_usd, l.max_amount_usd, l.remaining_base_amount, l.payment_note, l.status, l.created_at,
+		       u.username, u.player_id, u.is_admin,
+		       COALESCE(m.total_deals,0), COALESCE(m.completed_deals,0)
+		FROM p2p_listings l
+		JOIN users u ON u.id = l.user_id
+		LEFT JOIN p2p_merchants m ON m.user_id = l.user_id
+		WHERE l.id = $1 AND l.status = 'active' AND l.user_id != $2 AND l.remaining_base_amount > 0.00000001;
+	`, listingID, viewerUserID).Scan(&l.ID, &l.UserID, &l.Side, &l.BaseAsset, &l.AssetClass, &l.RateUsd, &l.MinAmountUsd, &l.MaxAmountUsd, &l.RemainingBaseAmount, &l.PaymentNote, &l.Status, &l.CreatedAt, &l.Username, &l.PlayerID, &l.IsOfficial, &l.TotalDeals, &l.CompletedDeals)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ListingWithPoster{}, ErrListingNotFound
+		}
+		return ListingWithPoster{}, err
+	}
+	return l, nil
+}
+
 func GetMyListings(ctx context.Context, pool *pgxpool.Pool, userID int) ([]Listing, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, user_id, side, base_asset, asset_class, rate_usd, min_amount_usd, max_amount_usd, remaining_base_amount, payment_note, status, created_at
@@ -180,6 +196,19 @@ func CloseListing(ctx context.Context, pool *pgxpool.Pool, userID int, listingID
 		return nil
 	}
 
+	var hasActiveDeal bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM p2p_deals
+			WHERE listing_id = $1 AND status = 'awaiting_payment'
+		);
+	`, listingID).Scan(&hasActiveDeal); err != nil {
+		return err
+	}
+	if hasActiveDeal {
+		return ErrListingHasActiveDeals
+	}
+
 	if l.RemainingBaseAmount > 0 {
 		if l.Side == "sell" {
 			if err := moveAssetIn(ctx, tx, userID, l.AssetClass, l.BaseAsset, l.RemainingBaseAmount, l.RateUsd); err != nil {
@@ -187,9 +216,9 @@ func CloseListing(ctx context.Context, pool *pgxpool.Pool, userID int, listingID
 			}
 		} else {
 			usdRefund := l.RemainingBaseAmount * l.RateUsd
-			fundingSource, fsErr := bankcards_sql.ResolveFundingSource(ctx, pool, userID)
-			if fsErr != nil {
-				return fsErr
+			fundingSource, err := bankcards_sql.ResolveFundingSource(ctx, tx, userID)
+			if err != nil {
+				return err
 			}
 			if err := bankcards_sql.AdjustFundingBalance(ctx, tx, fundingSource, usdRefund); err != nil {
 				return err
@@ -201,6 +230,5 @@ func CloseListing(ctx context.Context, pool *pgxpool.Pool, userID int, listingID
 	if err != nil {
 		return err
 	}
-	_ = time.Now
 	return tx.Commit(ctx)
 }

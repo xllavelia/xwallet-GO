@@ -2,6 +2,7 @@ package auth_http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -76,30 +77,46 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		if err := users_sql.InsertUser(r.Context(), pool, req.PlayerID, req.Username, string(hash), false); err != nil {
+		tx, err := pool.Begin(r.Context())
+		if err != nil {
+			http.Error(w, "could not start registration", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(r.Context())
+
+		if err := users_sql.InsertUserTx(r.Context(), tx, req.PlayerID, req.Username, string(hash), false); err != nil {
 			http.Error(w, "username or player id already taken", http.StatusConflict)
 			return
 		}
-
-		user, err := users_sql.GetUserByIdentifier(r.Context(), pool, req.PlayerID)
+		user, err := users_sql.GetUserByPlayerIDTx(r.Context(), tx, req.PlayerID)
 		if err != nil {
-			http.Error(w, "user was created but could not be loaded", http.StatusInternalServerError)
+			http.Error(w, "could not load new user", http.StatusInternalServerError)
 			return
 		}
-
-		if err := wallet_sql.InsertWallet(r.Context(), pool, user.ID); err != nil {
+		if err := users_sql.UpdateUserDeviceTx(r.Context(), tx, req.PlayerID, strings.TrimSpace(r.Header.Get("X-Device-ID"))); err != nil {
+			if errors.Is(err, users_sql.ErrDeviceBanned) {
+				http.Error(w, "account or device banned", http.StatusForbidden)
+				return
+			}
+			http.Error(w, "could not update device", http.StatusInternalServerError)
+			return
+		}
+		if err := wallet_sql.InsertWalletTx(r.Context(), tx, user.ID); err != nil {
 			http.Error(w, "could not create wallet", http.StatusInternalServerError)
 			return
 		}
-		if err := referral_sql.CreateReferralForNewUser(r.Context(), pool, user.ID); err != nil {
+		if err := referral_sql.CreateReferralForNewUserTx(r.Context(), tx, user.ID); err != nil {
 			http.Error(w, "could not create referral profile", http.StatusInternalServerError)
 			return
 		}
-		if err := user_vouchers_sql.GrantFeeDiscountVoucher(r.Context(), pool, user.ID, 100.00, 345600, "welcome", prime_sql.DefaultVoucherSlots); err != nil {
+		if err := user_vouchers_sql.GrantFeeDiscountVoucherTx(r.Context(), tx, user.ID, 100.00, 345600, "welcome", prime_sql.DefaultVoucherSlots); err != nil {
 			http.Error(w, "could not create welcome voucher", http.StatusInternalServerError)
 			return
 		}
-		users_sql.UpdateUserDevice(r.Context(), pool, req.PlayerID, r.Header.Get("X-Device-ID"))
+		if err := tx.Commit(r.Context()); err != nil {
+			http.Error(w, "could not complete registration", http.StatusInternalServerError)
+			return
+		}
 
 		token, err := generateToken(user)
 		if err != nil {

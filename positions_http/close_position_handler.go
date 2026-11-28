@@ -2,6 +2,7 @@ package positions_http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -9,6 +10,7 @@ import (
 	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
+	"xwallet-server/priceoracle"
 	"xwallet-server/users_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,7 +41,7 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		var req closePositionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ClosePrice <= 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
@@ -63,7 +65,13 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		pnl := CalcPnl(pos.Margin, pos.Leverage, pos.EntryPrice, req.ClosePrice, pos.Type)
+		closePrice, hasPrice := priceoracle.Get(pos.Coin)
+		if !hasPrice || closePrice <= 0 {
+			http.Error(w, "price unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		pnl := CalcPnl(pos.Margin, pos.Leverage, pos.EntryPrice, closePrice, pos.Type)
 		pnlPercent := CalcPnlPercent(pnl, pos.Margin)
 		result := "win"
 		if pnl < 0 {
@@ -84,7 +92,11 @@ func ClosePositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		defer tx.Rollback(r.Context())
 
-		if err := positions_sql.ClosePositionTx(r.Context(), tx, id, req.ClosePrice, pnl, pnlPercent, result, 0); err != nil {
+		if err := positions_sql.ClosePositionTx(r.Context(), tx, id, closePrice, pnl, pnlPercent, result, 0); err != nil {
+			if errors.Is(err, positions_sql.ErrPositionAlreadyClosed) {
+				http.Error(w, "position already closed", http.StatusConflict)
+				return
+			}
 			http.Error(w, "could not close position", http.StatusInternalServerError)
 			return
 		}

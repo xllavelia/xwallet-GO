@@ -2,11 +2,11 @@ package p2p_sql
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
 	"xwallet-server/bankcards_sql"
+	"xwallet-server/card_sql"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -20,25 +20,21 @@ var cryptoColumn = map[string]string{
 	"TON": "ton_amount",
 }
 
-func randomCardNumber() string {
-	digits := "0123456789"
-	b := make([]byte, 16)
-	rand.Read(b)
-	out := make([]byte, 16)
-	for i, v := range b {
-		out[i] = digits[int(v)%10]
-	}
-	return string(out)
-}
-
 func moveCryptoOut(ctx context.Context, q bankcards_sql.Queryer, userID int, coin string, amount float64) error {
 	col, ok := cryptoColumn[coin]
 	if !ok {
 		return fmt.Errorf("unsupported coin: %s", coin)
 	}
-	sqlQuery := fmt.Sprintf(`UPDATE crypto_cards SET %s = %s - $1 WHERE user_id = $2 AND %s >= $1 RETURNING %s;`, col, col, col, col)
+	cardID, err := card_sql.LockCryptoCard(ctx, q, userID)
+	if err != nil {
+		if errors.Is(err, card_sql.ErrCryptoCardNotFound) {
+			return ErrInsufficientAsset
+		}
+		return err
+	}
+	sqlQuery := fmt.Sprintf(`UPDATE crypto_cards SET %s = %s - $1 WHERE id = $3 AND user_id = $2 AND %s >= $1 RETURNING %s;`, col, col, col, col)
 	var newAmt float64
-	err := q.QueryRow(ctx, sqlQuery, amount, userID).Scan(&newAmt)
+	err = q.QueryRow(ctx, sqlQuery, amount, userID, cardID).Scan(&newAmt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInsufficientAsset
@@ -53,14 +49,19 @@ func moveCryptoIn(ctx context.Context, q bankcards_sql.Queryer, userID int, coin
 	if !ok {
 		return fmt.Errorf("unsupported coin: %s", coin)
 	}
-	_, _ = q.Exec(ctx, `
-		INSERT INTO crypto_cards (card_number, user_id, valid_thru)
-		SELECT $1, $2, now() + interval '2 years'
-		WHERE NOT EXISTS (SELECT 1 FROM crypto_cards WHERE user_id = $2);
-	`, randomCardNumber(), userID)
-	sqlQuery := fmt.Sprintf(`UPDATE crypto_cards SET %s = %s + $1 WHERE user_id = $2;`, col, col)
-	_, err := q.Exec(ctx, sqlQuery, amount, userID)
-	return err
+	cardID, err := card_sql.EnsureCryptoCard(ctx, q, userID)
+	if err != nil {
+		return err
+	}
+	sqlQuery := fmt.Sprintf(`UPDATE crypto_cards SET %s = %s + $1 WHERE id = $3 AND user_id = $2;`, col, col)
+	tag, err := q.Exec(ctx, sqlQuery, amount, userID, cardID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return card_sql.ErrCryptoCardNotFound
+	}
+	return nil
 }
 
 func moveLavxOut(ctx context.Context, q bankcards_sql.Queryer, userID int, amount float64) error {
@@ -106,21 +107,20 @@ func moveStockOut(ctx context.Context, q bankcards_sql.Queryer, userID int, symb
 }
 
 func moveStockIn(ctx context.Context, q bankcards_sql.Queryer, userID int, symbol string, quantity float64, costBasisPerUnit float64) error {
-	var existingQty, existingAvg float64
-	err := q.QueryRow(ctx, `SELECT quantity, avg_cost FROM stock_holdings WHERE user_id = $1 AND symbol = $2 FOR UPDATE;`, userID, symbol).Scan(&existingQty, &existingAvg)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	newQty := existingQty + quantity
-	newAvg := costBasisPerUnit
-	if existingQty > 0 && newQty > 0 {
-		newAvg = (existingQty*existingAvg + quantity*costBasisPerUnit) / newQty
-	}
-	_, err = q.Exec(ctx, `
+	_, err := q.Exec(ctx, `
 		INSERT INTO stock_holdings (user_id, symbol, quantity, avg_cost, updated_at)
 		VALUES ($1, $2, $3, $4, now())
-		ON CONFLICT (user_id, symbol) DO UPDATE SET quantity = $3, avg_cost = $4, updated_at = now();
-	`, userID, symbol, newQty, newAvg)
+		ON CONFLICT (user_id, symbol) DO UPDATE
+		SET quantity = COALESCE(stock_holdings.quantity, 0) + EXCLUDED.quantity,
+		    avg_cost = CASE
+		        WHEN COALESCE(stock_holdings.quantity, 0) + EXCLUDED.quantity > 0 THEN
+		            (COALESCE(stock_holdings.quantity, 0) * COALESCE(stock_holdings.avg_cost, 0)
+		                + EXCLUDED.quantity * EXCLUDED.avg_cost)
+		            / (COALESCE(stock_holdings.quantity, 0) + EXCLUDED.quantity)
+		        ELSE 0
+		    END,
+		    updated_at = now();
+	`, userID, symbol, quantity, costBasisPerUnit)
 	return err
 }
 

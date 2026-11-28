@@ -2,6 +2,7 @@ package auth_http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -46,7 +47,14 @@ func LoginHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
-		users_sql.UpdateUserDevice(r.Context(), pool, user.PlayerID, r.Header.Get("X-Device-ID"))
+		if err := users_sql.UpdateUserDevice(r.Context(), pool, user.PlayerID, strings.TrimSpace(r.Header.Get("X-Device-ID"))); err != nil {
+			if errors.Is(err, users_sql.ErrDeviceBanned) {
+				http.Error(w, "account or device banned", http.StatusForbidden)
+				return
+			}
+			http.Error(w, "could not update device", http.StatusInternalServerError)
+			return
+		}
 
 		token, err := generateToken(user)
 		if err != nil {

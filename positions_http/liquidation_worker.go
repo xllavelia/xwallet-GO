@@ -2,6 +2,7 @@ package positions_http
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -78,6 +79,9 @@ func runLiquidationCheck(pool *pgxpool.Pool) {
 
 		if err := positions_sql.ClosePositionTx(ctx, tx, p.ID, closePrice, pnl, pnlPercent, result, 0); err != nil {
 			tx.Rollback(ctx)
+			if errors.Is(err, positions_sql.ErrPositionAlreadyClosed) {
+				continue
+			}
 			log.Println("liquidation worker: close failed for", p.ID, err)
 			continue
 		}

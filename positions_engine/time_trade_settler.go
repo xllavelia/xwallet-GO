@@ -2,6 +2,7 @@ package positions_engine
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -87,6 +88,9 @@ func settleOne(pool *pgxpool.Pool, id int) {
 	defer tx.Rollback(ctx)
 
 	if err := positions_sql.ClosePositionTx(ctx, tx, id, currentPrice, pnl, pnlPercent, result, 0); err != nil {
+		if errors.Is(err, positions_sql.ErrPositionAlreadyClosed) {
+			return
+		}
 		log.Println("time trade settle: close failed for", id, err)
 		return
 	}

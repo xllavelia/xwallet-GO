@@ -2,6 +2,7 @@ package p2p_http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -114,6 +115,8 @@ func ConfirmDealHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			switch err {
 			case p2p_sql.ErrDealNotFound:
 				http.Error(w, "deal not found", http.StatusNotFound)
+			case p2p_sql.ErrOnlyTakerCanConfirm:
+				http.Error(w, "only the taker can confirm this deal", http.StatusForbidden)
 			case p2p_sql.ErrDealNotPending:
 				http.Error(w, "this deal is no longer pending", http.StatusConflict)
 			case p2p_sql.ErrDealExpired:
@@ -187,7 +190,11 @@ func DealDetailHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 		d, err := p2p_sql.GetDealDetail(r.Context(), pool, userID, id)
 		if err != nil {
-			http.Error(w, "deal not found", http.StatusNotFound)
+			if errors.Is(err, p2p_sql.ErrDealNotFound) {
+				http.Error(w, "deal not found", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "could not load deal", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

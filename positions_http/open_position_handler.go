@@ -10,10 +10,12 @@ import (
 	"xwallet-server/bankcards_sql"
 	"xwallet-server/battlepass_sql"
 	"xwallet-server/positions_sql"
+	"xwallet-server/priceoracle"
 	"xwallet-server/prime_sql"
 	"xwallet-server/referral_sql"
 	"xwallet-server/user_vouchers_sql"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -57,6 +59,15 @@ func generateTradeID() string {
 	return "TRD-" + string(out)
 }
 
+func isSupportedCoin(coin string) bool {
+	for _, supportedCoin := range priceoracle.SupportedCoins {
+		if coin == supportedCoin {
+			return true
+		}
+	}
+	return false
+}
+
 func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -79,16 +90,23 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "type must be 'long' or 'short'", http.StatusBadRequest)
 			return
 		}
-		if req.Amount <= 0 {
-			http.Error(w, "amount must be positive", http.StatusBadRequest)
+		amount, validAmount := wallet_sql.NormalizeUSDAmount(req.Amount)
+		if !validAmount {
+			http.Error(w, "amount must be a positive USD amount", http.StatusBadRequest)
 			return
 		}
+		req.Amount = amount
 		if req.Leverage <= 0 || req.Leverage > 200 {
 			http.Error(w, "leverage must be between 1 and 200", http.StatusBadRequest)
 			return
 		}
-		if req.EntryPrice <= 0 {
-			http.Error(w, "invalid entry price", http.StatusBadRequest)
+		if !isSupportedCoin(req.Coin) {
+			http.Error(w, "unsupported coin", http.StatusBadRequest)
+			return
+		}
+		entryPrice, hasPrice := priceoracle.Get(req.Coin)
+		if !hasPrice || entryPrice <= 0 {
+			http.Error(w, "price unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -118,7 +136,7 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		margin := req.Amount / float64(req.Leverage)
 		fees := CalcFeesOnMargin(margin, feeRate)
-		liqPrice := CalcLiquidationPrice(req.EntryPrice, req.Leverage, req.Type)
+		liqPrice := CalcLiquidationPrice(entryPrice, req.Leverage, req.Type)
 
 		tx, err := pool.Begin(r.Context())
 		if err != nil {
@@ -148,7 +166,7 @@ func OpenPositionHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		pos := positions_sql.Position{
 			TradeID: generateTradeID(), UserID: userID, Coin: req.Coin, Type: req.Type,
-			EntryPrice: req.EntryPrice, Leverage: req.Leverage, Amount: req.Amount, Margin: margin,
+			EntryPrice: entryPrice, Leverage: req.Leverage, Amount: req.Amount, Margin: margin,
 			Fees: fees, FeesPaidByVoucher: feesPaidByVoucher, LiqPrice: liqPrice,
 			AutoClose: req.AutoClose, AutoCloseTarget: req.AutoCloseTarget,
 			FundingKind: fundingSource.Kind, FundingCardID: fundingCardIDPtr(fundingSource),

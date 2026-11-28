@@ -32,6 +32,7 @@ type serverRow struct {
 	TotalEarned     float64
 	TotalEnergyUsed float64
 	PurchasedAt     time.Time
+	LastTickAt      time.Time
 }
 
 // activeBuffs — какие баффы сейчас активны у игрока (уже проверено expires_at > now()).
@@ -56,7 +57,7 @@ func getOrCreateProfile(ctx context.Context, tx pgx.Tx, userID int) (profileRow,
 	var p profileRow
 	err = tx.QueryRow(ctx, `
 		SELECT energy, max_energy, extra_slots, lifetime_earned, lifetime_spent, lifetime_energy_used, last_tick_at
-		FROM mining_profile WHERE user_id = $1;
+		FROM mining_profile WHERE user_id = $1 FOR UPDATE;
 	`, userID).Scan(&p.Energy, &p.MaxEnergy, &p.ExtraSlots, &p.LifetimeEarned, &p.LifetimeSpent, &p.LifetimeEnergyUsed, &p.LastTickAt)
 	return p, err
 }
@@ -150,6 +151,24 @@ func isAwake(def ServerDef, s serverRow, buffs activeBuffs, now time.Time) bool 
 
 // ===================== ТИК =====================
 
+func settleTickTx(ctx context.Context, tx pgx.Tx, userID int) (float64, time.Time, error) {
+	profile, err := getOrCreateProfile(ctx, tx, userID)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+
+	now := time.Now()
+	dt := now.Sub(profile.LastTickAt)
+	if dt <= 0 {
+		return 0, now, nil
+	}
+	if dt > MaxCatchUpDuration {
+		dt = MaxCatchUpDuration
+	}
+	totalEarned, err := accrueMining(ctx, tx, userID, profile, now, dt)
+	return totalEarned, now, err
+}
+
 // Tick пересчитывает доход/энергию с момента last_tick_at до now() и обновляет БД.
 // Вызывается перед каждым чтением состояния и перед каждым действием.
 func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
@@ -159,45 +178,46 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 	}
 	defer tx.Rollback(ctx)
 
-	profile, err := getOrCreateProfile(ctx, tx, userID)
+	totalEarned, _, err := settleTickTx(ctx, tx, userID)
 	if err != nil {
 		return err
 	}
-
-	now := time.Now()
-	dt := now.Sub(profile.LastTickAt)
-	if dt <= 0 {
-		return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
-	if dt > MaxCatchUpDuration {
-		dt = MaxCatchUpDuration
+	if totalEarned > 0 {
+		battlepass_sql.BPTrackEvent(ctx, pool, userID,
+			fmt.Sprintf("mining:income:%d:%d", userID, time.Now().UnixNano()),
+			"mining_income_usd", totalEarned)
 	}
-	dtHours := dt.Hours()
+	return nil
+}
 
+func accrueMining(ctx context.Context, tx pgx.Tx, userID int, profile profileRow, now time.Time, dt time.Duration) (float64, error) {
 	buffs, err := loadActiveBuffs(ctx, tx, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, catalog_id, rank, awake_until, exhausted, total_earned, total_energy_used, purchased_at
+		SELECT id, catalog_id, rank, awake_until, exhausted, total_earned, total_energy_used, purchased_at, last_tick_at
 		FROM mining_servers WHERE user_id = $1 FOR UPDATE;
 	`, userID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var servers []serverRow
 	for rows.Next() {
 		var s serverRow
-		if err := rows.Scan(&s.ID, &s.CatalogID, &s.Rank, &s.AwakeUntil, &s.Exhausted, &s.TotalEarned, &s.TotalEnergyUsed, &s.PurchasedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.CatalogID, &s.Rank, &s.AwakeUntil, &s.Exhausted, &s.TotalEarned, &s.TotalEnergyUsed, &s.PurchasedAt, &s.LastTickAt); err != nil {
 			rows.Close()
-			return err
+			return 0, err
 		}
 		servers = append(servers, s)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, err
 	}
 
 	type active struct {
@@ -245,13 +265,16 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 		newTotalEarned := a.row.TotalEarned + earned
 		exhausted := newTotalEarned >= a.def.LifetimeProfitCap
 
-		_, err = tx.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			UPDATE mining_servers
-			SET total_earned = $1, total_energy_used = total_energy_used + $2, exhausted = $3, last_tick_at = now()
-			WHERE id = $4;
-		`, newTotalEarned, usedEnergy, exhausted, a.row.ID)
+			SET total_earned = $1, total_energy_used = total_energy_used + $2, exhausted = $3, last_tick_at = $7
+			WHERE id = $4 AND user_id = $5 AND last_tick_at = $6;
+		`, newTotalEarned, usedEnergy, exhausted, a.row.ID, userID, a.row.LastTickAt, now)
 		if err != nil {
-			return err
+			return 0, err
+		}
+		if tag.RowsAffected() != 1 {
+			return 0, fmt.Errorf("mining server %d changed during tick", a.row.ID)
 		}
 
 		totalEarned += earned
@@ -266,31 +289,25 @@ func Tick(ctx context.Context, pool *pgxpool.Pool, userID int) error {
 		newEnergy = profile.MaxEnergy
 	}
 
-	_, err = tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 		UPDATE mining_profile
-		SET energy = $1, lifetime_earned = lifetime_earned + $2, lifetime_energy_used = lifetime_energy_used + $3, last_tick_at = now()
-		WHERE user_id = $4;
-	`, newEnergy, totalEarned, totalEnergyUsed, userID)
+		SET energy = $1, lifetime_earned = lifetime_earned + $2, lifetime_energy_used = lifetime_energy_used + $3, last_tick_at = $4
+		WHERE user_id = $5 AND last_tick_at = $6;
+	`, newEnergy, totalEarned, totalEnergyUsed, now, userID, profile.LastTickAt)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	if tag.RowsAffected() != 1 {
+		return 0, fmt.Errorf("mining profile %d changed during tick", userID)
 	}
 
 	if totalEarned > 0 {
 		if err := AdjustWalletBalanceTx(ctx, tx, userID, totalEarned); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	_ = dtHours
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-	if totalEarned > 0 {
-		battlepass_sql.BPTrackEvent(ctx, pool, userID,
-			fmt.Sprintf("mining:income:%d:%d", userID, time.Now().UnixNano()),
-			"mining_income_usd", totalEarned)
-	}
-	return nil
+	return totalEarned, nil
 }
 
 // ===================== DTO =====================

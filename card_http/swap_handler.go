@@ -2,13 +2,14 @@ package card_http
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 
 	"xwallet-server/auth_http"
-	"xwallet-server/bankcards_sql"
 	"xwallet-server/card_history_sql"
 	"xwallet-server/card_sql"
 	"xwallet-server/users_sql"
+	"xwallet-server/wallet_sql"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -54,7 +55,14 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, "cannot swap the same asset", http.StatusBadRequest)
 			return
 		}
-		if req.FromAmount <= 0 {
+		if req.FromAsset == "USDT" {
+			amount, valid := wallet_sql.NormalizeUSDAmount(req.FromAmount)
+			if !valid {
+				http.Error(w, "amount must be positive", http.StatusBadRequest)
+				return
+			}
+			req.FromAmount = amount
+		} else if req.FromAmount <= 0 {
 			http.Error(w, "amount must be positive", http.StatusBadRequest)
 			return
 		}
@@ -101,13 +109,15 @@ func SwapHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			toAmount = usdValue / toPrice
 		}
 
-		fundingSource, err := bankcards_sql.ResolveFundingSource(r.Context(), pool, userID)
-		if err != nil {
-			http.Error(w, "could not resolve funding source", http.StatusInternalServerError)
-			return
+		if req.ToAsset == "USDT" {
+			toAmount = math.Floor(toAmount*100) / 100
+			if math.IsNaN(toAmount) || math.IsInf(toAmount, 0) || toAmount <= 0 {
+				http.Error(w, "amount must be positive", http.StatusBadRequest)
+				return
+			}
 		}
 
-		moveErr := card_sql.ExecuteAssetMove(r.Context(), pool, fundingSource, req.FromAsset, req.ToAsset, req.FromAmount, toAmount)
+		moveErr := card_sql.ExecuteAssetMove(r.Context(), pool, userID, req.FromAsset, req.ToAsset, req.FromAmount, toAmount)
 		if moveErr != nil {
 			if moveErr == card_sql.ErrInsufficientAssetBalance {
 				http.Error(w, "insufficient balance", http.StatusPaymentRequired)
